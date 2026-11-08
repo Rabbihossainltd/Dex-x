@@ -1150,9 +1150,32 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         super.attachBaseContext(DexLocale.wrap(base));
     }
 
+    /**
+     * Is this activity being created on the phone's own screen?
+     *
+     * True only when the desktop was started where it does not belong — by a
+     * stale launcher icon, a notification, or an adb command that forgot the
+     * display id. The desktop is a display of its own; on the phone it is the
+     * app screen and nothing else (see {@link ConnectActivity}).
+     */
+    private boolean onPhoneScreen() {
+        Display d = getDisplay();
+        return d == null || d.getDisplayId() == Display.DEFAULT_DISPLAY;
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // Before anything is built: the desktop is not a phone screen, and a
+        // desktop drawn on the phone is the "it opened like a launcher" report.
+        // Hand over to the one screen this app shows there and stop.
+        if (onPhoneScreen()) {
+            DexLog.step("launcher", "started on the phone's own screen — showing the app screen instead");
+            startActivity(new Intent(this, ConnectActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP));
+            finish();
+            return;
+        }
         refreshDisplayMetrics();
         // First line the PC sees from us: which display we actually landed on
         // (it asked for one specific id), at what scale, and which of the two

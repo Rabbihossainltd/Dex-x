@@ -1,6 +1,6 @@
 [package]
 name = "open-android-dex-tauri"
-version = "0.4.3"
+version = "0.5.0"
 description = "Dex-X: a desktop for your Android phone, on your Windows PC"
 authors = ["Rabbi Hossain"]
 license = "GPL-3.0-or-later"

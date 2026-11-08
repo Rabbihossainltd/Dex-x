@@ -177,6 +177,14 @@
     <string name="st_taskbar">Taskbar</string>
     <string name="st_taskbar_autohide">Hide the taskbar when not in use</string>
     <string name="st_taskbar_autohide_sub">It slides away and comes back when the pointer reaches the bottom of the screen — a maximized window then fills it</string>
+    <!-- The app screen on the phone: the only thing this app shows there. -->
+    <string name="cx_connected">Connected</string>
+    <string name="cx_connected_sub">This phone is driving a desktop on your computer</string>
+    <string name="cx_connected_to">Connected to %1$s</string>
+    <string name="cx_not_connected">Not connected</string>
+    <string name="cx_not_connected_sub">Open Dex-X on your computer, then plug this phone in with a USB cable — or put both on the same Wi‑Fi and connect from the computer. Nothing else is needed here.</string>
+    <string name="cx_disconnect">Disconnect</string>
+    <string name="cx_disconnecting">Disconnecting…</string>
     <string name="lx_snap_title">Snap this window to</string>
     <string name="lx_snap_left">Left half</string>
     <string name="lx_snap_right">Right half</string>

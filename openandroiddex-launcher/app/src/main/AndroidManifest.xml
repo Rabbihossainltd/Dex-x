@@ -204,6 +204,26 @@
              from it WITHOUT FLAG_ACTIVITY_NEW_TASK joins the desktop's own
              task — and launch bounds are a property of the task. See
              WidgetDetourActivity for what that cost once. -->
+        <!--
+             The app's ONLY screen: connected or not, and a way to disconnect.
+             Nothing else — no desktop, no settings, no launcher.
+
+             launchMode singleTask with its own affinity, so tapping the icon
+             twice brings the same screen back instead of stacking copies, and
+             so it never joins the desktop's task (which would drag the desktop
+             into whatever window this screen happens to occupy).
+        -->
+        <activity
+            android:name=".ConnectActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.ccrstech.openandroiddex.launcher.connect"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboard|keyboardHidden|navigation|uiMode|locale|layoutDirection|fontScale">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
         <activity
             android:name=".LauncherActivity"
             android:exported="true"
@@ -211,18 +231,20 @@
             android:resizeableActivity="true"
             android:stateNotNeeded="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboard|keyboardHidden|navigation|uiMode">
-            <!-- openable like a normal app (e.g. via am start from the PC) -->
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-            <!-- eligible as a home on secondary displays -->
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.HOME" />
-                <category android:name="android.intent.category.SECONDARY_HOME" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
+            <!--
+                 Deliberately NO intent filter.
+
+                 This activity is the desktop, and the desktop only ever exists
+                 on a display the computer made: the computer starts it with an
+                 `am start` addressed at this component and that display, which
+                 needs no intent filter at all. A MAIN/LAUNCHER filter put it in
+                 the phone's app list and a HOME filter offered it as the
+                 phone's home screen, and both are exactly what this app is
+                 not. The app's one screen is ConnectActivity; see it for why.
+
+                 Exported stays true: the computer's adb shell launches this
+                 from another uid.
+            -->
         </activity>
         <!-- In-desktop Settings window (Display size). singleTask so
              re-opening it refocuses the existing window instead of stacking

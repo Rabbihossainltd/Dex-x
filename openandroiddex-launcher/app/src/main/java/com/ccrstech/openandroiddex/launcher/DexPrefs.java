@@ -310,6 +310,16 @@ final class DexPrefs {
      * thing that knows who holds the role now.
      */
     static final String KEY_HOME_ASKED = "home_asked";
+    /**
+     * Whether the home role has been handed back to the phone.
+     *
+     * Older builds could take the phone's home role, which kept this app in
+     * front of the phone's own launcher for ever. The role is no longer
+     * offered (see ConnectActivity.maybeReleaseHomeRole), and this is what
+     * makes the handing-back a single event per phone rather than a prompt
+     * on every visit to the app screen.
+     */
+    static final String KEY_HOME_RELEASED = "home_released";
 
     // ── Defaults ──
     /** This is Open Android DeX; the DeX shell is what it opens on. */
