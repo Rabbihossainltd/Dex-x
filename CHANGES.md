@@ -42,6 +42,22 @@ session) does not have to diff 42 000 lines of Rust to find out.
 
 ---
 
+## v0.5.1 — the window's own buttons, and no phone bar on the desktop
+
+Reported from a real desktop session with a screenshot: a window was wearing
+One UI's caption (a ▢, a ✕, no minimise) and the phone's navigation bar was
+still along the bottom of the desktop display.
+
+| # | Reported | What was actually wrong | Fix |
+| --- | --- | --- | --- |
+| 1 | **No minimise option** — the window has One UI's ▢ ✕, not ours | The caption bar is drawn *inside* the shell's caption window for the task (that is what glues it to the window). That host was found by asking for `TYPE_APPLICATION`, and on this Samsung shell the caption strip is **not** that type — so the search returned nothing, nothing was attached, and the window kept the platform's own buttons. | The host is now chosen by **bounds alone**: full task width, at the task's top, no taller than a caption. The window type was only ever a stand-in for "is this the caption strip" and it was the wrong stand-in. |
+| 2 | Same, for windows whose app view starts *below* the shell's caption | The app-window fallback demanded that the app window's top equal the task's top. A shell that draws its own caption puts the app's view one caption lower, so those tasks were unhostable — no bar, and the platform's ▢ ✕ as the only buttons. | The fallback accepts a top up to one caption height below the task, and the bar is placed against the measured offset instead of assuming zero. |
+| 3 | Same, when nothing can be hosted at all | The launch curtain gave up after 1.5 s and left the bare window — the platform's caption, with none of our buttons. | The curtain is replaced by the **real bar drawn on the display** (`TYPE_ACCESSIBILITY_OVERLAY` at the task's caption strip), moved with the window by the reconcile loop. A bar that trails a drag by a frame beats no minimise button at all, and this path only runs where the alternative was nothing. |
+| 4 | The phone's **navigation bar is still on the desktop display** | Nothing removed it. A virtual display made without system decorations is *supposed* to have none, but One UI adds its own to any public trusted display, and nothing an app can do per-window removes it: bar visibility follows the **focused** window, which is whatever app is in front and has no reason to ask for immersive. | `adb_prepare_desktop` now writes `policy_control immersive.full=*` and `immersive_mode_confirmations confirmed` — the only root-free, system-wide form of the ask. Both values are snapshotted into `desktop-restore.json` (`secure.*`) and put back by the same one-line undo the wmd watchdog is armed with, so a pulled cable still restores them. |
+| 5 | Diagnosing any of this from a screenshot | The "no caption host" log line said how long it had waited but not what the window list actually contained. | It now dumps every window on the display — id, type, bounds, title — so a task with no bar of ours can be explained from `caption.log` instead of guessed at twice. |
+
+---
+
 ## Next, in order
 
 1. **Taskbar auto-hide with hover reveal** — what the reporter of the taskbar

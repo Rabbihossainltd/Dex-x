@@ -807,6 +807,57 @@ const DESKTOP_GLOBALS: [&str; 4] = [
 /// right answer anyway, since unset is the platform default and blocking.
 const TOUCH_GLOBAL: &str = "block_untrusted_touches";
 
+/// The `Settings.Secure` keys a desktop session writes, and puts back on exit.
+///
+/// `policy_control` is the only root-free way to take the platform's
+/// navigation bar off a SECONDARY display. A virtual display made without
+/// system decorations is supposed to have none, but One UI adds its own
+/// navigation bar to any public, trusted display — measured on an SM-S938B,
+/// where the bar sat at the bottom of the desktop under our own taskbar and
+/// nothing an app can do per-window removes it: bar visibility follows the
+/// FOCUSED window, and the focused window is whatever app is in front, which
+/// has no reason to ask for immersive mode.
+///
+/// `immersive.full=*` is the system-wide form of that ask, applied by the
+/// window manager to whichever display has focus. The phone's own screen
+/// follows it too — a swipe brings the bars back there for as long as the user
+/// needs them — and the whole thing is restored here on exit, because the value
+/// it replaces is snapshotted first (see [`snapshot_desktop_secure`]).
+///
+/// `immersive_mode_confirmations` is set so the platform does not put its
+/// "swipe up to exit full screen" bubble over the desktop on every session.
+const DESKTOP_SECURE: [&str; 2] = ["policy_control", "immersive_mode_confirmations"];
+
+/// Snapshot the secure keys above, under a `secure.`-prefixed name so the
+/// existing undo map can hold both namespaces without a second file.
+fn snapshot_desktop_secure(app: &tauri::AppHandle, serial: &str, before: &HashMap<String, String>) {
+    let key = restore_key(app, serial);
+    let mut map = load_restore_map(app);
+    let entry = map.entry(key).or_default();
+    for (name, value) in before {
+        entry.entry(format!("secure.{name}")).or_insert_with(|| value.clone());
+    }
+    save_restore_map(app, &map);
+}
+
+/// `settings list secure`, filtered to the keys above.
+fn read_desktop_secure(app: &tauri::AppHandle, serial: &str) -> HashMap<String, String> {
+    let out = run_adb(app, &["-s", serial, "shell", "settings list secure"]).unwrap_or_default();
+    parse_globals(&out, &DESKTOP_SECURE)
+}
+
+/// Put the secure keys back: the value this phone had, or no row at all.
+fn undo_secure_script(saved: &HashMap<String, String>) -> String {
+    let mut out = String::new();
+    for key in DESKTOP_SECURE {
+        match saved.get(&format!("secure.{key}")).and_then(|v| restorable(v)) {
+            Some(v) => out.push_str(&format!("settings put secure {key} {v}; ")),
+            None => out.push_str(&format!("settings delete secure {key}; ")),
+        }
+    }
+    out
+}
+
 /// The `Settings.Global` keys "Reduce quality" zeroes (Settings → Performance).
 ///
 /// Kept apart from [`DESKTOP_GLOBALS`] because the two are undone by different
@@ -1067,6 +1118,27 @@ pub fn adb_prepare_desktop(
             ),
         ],
     )?;
+    // The platform's navigation bar, off the desktop. Snapshot first — this is
+    // the user's own setting on the phone's screen and it is put back on exit.
+    let sec_before = read_desktop_secure(&app, &serial);
+    snapshot_desktop_secure(&app, &serial, &sec_before);
+    if let Err(e) = run_adb(
+        &app,
+        &[
+            "-s",
+            &serial,
+            "shell",
+            "settings put secure immersive_mode_confirmations confirmed; \
+             settings put secure policy_control immersive.full=*",
+        ],
+    ) {
+        log::warn!("could not take the navigation bar off the desktop: {e}");
+    } else {
+        log::info!(
+            "navigation bar policy: policy_control immersive.full=* (was {})",
+            sec_before.get("policy_control").map_or("?", String::as_str)
+        );
+    }
     // Read back rather than assume: on a managed or hardened device a
     // `settings put` is accepted and dropped, and every later symptom
     // (no freeform, launcher stuck fullscreen) points somewhere else.
@@ -1348,6 +1420,10 @@ pub fn undo_globals_script(app: &tauri::AppHandle, serial: &str) -> String {
         None => out.push_str(&format!("settings delete global {TOUCH_GLOBAL}; ")),
     }
     out.push_str(&undo_perf_globals_script(&saved));
+    // The navigation bar comes back with everything else, from the same
+    // snapshot string, so a session that dies on a pulled cable still leaves
+    // the phone's own bars exactly as they were.
+    out.push_str(&undo_secure_script(&saved));
     // Carried by the same string, so a pulled cable puts the pointer speed back
     // too: the daemon's watchdog is armed with this line, and it is the only
     // thing that knows what the speed was before DeX.

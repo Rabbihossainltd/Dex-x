@@ -605,6 +605,7 @@ public final class CaptionService extends AccessibilityService {
             }
         }
         curtains.clear();
+        while (floating.size() > 0) hideFloatingBar(floating.keyAt(0));
         curtainSince.clear();
         noCurtain.clear();
         maximized.clear();
@@ -921,18 +922,24 @@ public final class CaptionService extends AccessibilityService {
                     if (ms > 5000 && !diagnosed.contains(t.taskId)) {
                         diagnosed.add(t.taskId);
                         trace("no caption host for task " + t.taskId + " after " + ms + "ms"
-                                + " (windows=" + windows.size()
-                                + ", captionlessDisplay=" + captionless(display)
+                                + " (captionlessDisplay=" + captionless(display)
                                 + ", task=" + t.left + "," + t.top + "," + t.right + ","
-                                + t.bottom + ") — wearing a curtain, not a bar");
+                                + t.bottom + ") — wearing a curtain, not a bar; windows: "
+                                + describe(windows));
                     }
                 }
                 if (captions.get(t.taskId) == null && !noCurtain.contains(t.taskId)) {
                     Long since = curtainSince.get(t.taskId);
                     if (since != null
                             && SystemClock.uptimeMillis() - since > CURTAIN_MAX_MS) {
+                        // Not "give up": give the user our buttons anyway. The
+                        // curtain has been up for 1.5s and nothing has come to
+                        // host on, which on a Samsung desktop means the window
+                        // is sitting there wearing One UI's own ▢ ✕ with no
+                        // minimise. Draw the real bar on the display instead.
                         hideCurtain(t.taskId);
                         noCurtain.add(t.taskId);
+                        showFloatingBar(t);
                     } else {
                         showCurtain(t);
                     }
@@ -941,6 +948,8 @@ public final class CaptionService extends AccessibilityService {
                 continue;
             }
             ensureCaption(host, t);
+            // A host turned up after all, so the fallback is in the way now.
+            if (captions.get(t.taskId) != null) hideFloatingBar(t.taskId);
         }
         if (missing > 0) {
             moved = true;          // poll fast until every task has a bar
@@ -973,6 +982,15 @@ public final class CaptionService extends AccessibilityService {
             int taskId = curtains.keyAt(i);
             if (tasks.containsKey(taskId)) continue;
             hideCurtain(taskId);
+            noCurtain.remove(taskId);
+        }
+        // The fallback bars outlive their window the same way, and one left behind
+        // is worse than a curtain left behind: it has buttons, and they would act on
+        // a task id that has since been reused by something else.
+        for (int i = floating.size() - 1; i >= 0; i--) {
+            int taskId = floating.keyAt(i);
+            if (tasks.containsKey(taskId)) continue;
+            hideFloatingBar(taskId);
             noCurtain.remove(taskId);
         }
         // A task that closed while still waiting for a host never reaches the sweep above,
@@ -1097,7 +1115,13 @@ public final class CaptionService extends AccessibilityService {
         int taskHeight = task.bottom - task.top;
         android.graphics.Rect r = new android.graphics.Rect();
         for (AccessibilityWindowInfo w : windows) {
-            if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+            // Deliberately NO window-type test here. The type was standing in
+            // for "is this the caption strip", and on One UI the strip is not
+            // always TYPE_APPLICATION — a window that fails this test is a task
+            // that wears the platform's own ▢ ✕ (and no minimise of ours) for
+            // the whole session. Bounds already say what it is: full task
+            // width, at the task's top, no taller than a caption. Those three
+            // are the test.
             w.getBoundsInScreen(r);
             // The host must span the FULL task width. Our surface is a child of the host
             // window's surface and is cropped to it: hosting on a narrower window yields a
@@ -1146,11 +1170,40 @@ public final class CaptionService extends AccessibilityService {
             if (isOurs(w)) continue;
             w.getBoundsInScreen(r);
             if (Math.abs(r.left - task.left) > 2 || Math.abs(r.right - task.right) > 2) continue;
-            if (Math.abs(r.top - task.top) > 2) continue;
+            // At the task's top, or just below it — a shell that draws its own
+            // caption puts the app's window under that caption inside the same
+            // task, and demanding the exact top made those tasks unhostable:
+            // no bar, and the platform's ▢ ✕ as the only buttons. The offset is
+            // handled where the bar is attached (ensureCaption's dy).
+            if (r.top < task.top - 2) continue;
+            if (r.top > task.top + captionHeight(task.taskId) + 2) continue;
             if (r.height() <= px(CAPTION_MAX_DP)) continue;  // a caption, or one of ours
             if (app == null || w.getId() < app.getId()) app = w;
         }
         return app;
+    }
+
+    /**
+     * Every window in the list, one line, for the log.
+     *
+     * Bounds, type and id are what decide whether a window can host a caption
+     * (see pickHost), so a task that ends up with no bar of ours has to say
+     * what the list actually contained — guessing at it from a screenshot is
+     * how a real bug survives two releases.
+     */
+    private static String describe(List<AccessibilityWindowInfo> windows) {
+        StringBuilder sb = new StringBuilder();
+        android.graphics.Rect r = new android.graphics.Rect();
+        for (AccessibilityWindowInfo w : windows) {
+            w.getBoundsInScreen(r);
+            if (sb.length() > 0) sb.append(" | ");
+            sb.append('#').append(w.getId())
+                    .append(" t=").append(w.getType())
+                    .append(" [").append(r.left).append(',').append(r.top)
+                    .append(' ').append(r.right).append(',').append(r.bottom).append(']')
+                    .append(" \"").append(w.getTitle()).append('"');
+        }
+        return sb.toString();
     }
 
     /** One of our own bars, by the title stamped on it in {@link #params}. */
@@ -1313,22 +1366,20 @@ public final class CaptionService extends AccessibilityService {
                 ? null : c.host.getSurfacePackage().getSurfaceControl();
     }
 
-    private Caption build(WmClient.Task task, int width, int height) {
-        Display display = getSystemService(android.hardware.display.DisplayManager.class)
-                .getDisplay(task.displayId);
-        // Views MUST be inflated against the target display's Context, not the service's.
-        // The service's resources describe the phone panel (~450dpi); the desktop runs at
-        // its own — 160dpi on a 1x screen, 320 on a Retina one. Using the wrong one scales
-        // every sp/dp by up to ~2.8 and the caption comes out enormous.
-        final android.content.Context ui = createDisplayContext(display);
-
-        Caption c = new Caption();
-        c.taskId = task.taskId;
-        c.width = width;
-        c.height = height;
-        c.host = newHost(display);
-        if (c.host == null) return null;
-
+    /**
+     * The bar itself: the title, the buttons, the resize grip.
+     *
+     * Lifted out of {@link #build} so the display-level fallback in
+     * {@link #showFloatingBar} can put up the SAME bar. That matters more than
+     * it looks: the fallback exists for the windows where the shell's caption
+     * host is never found, and if it drew a different bar the two paths would
+     * disagree about which buttons a given width has room for — which is the
+     * bug that comes back as "sometimes there is no minimise".
+     *
+     * @param c the bar's bookkeeping record; its {@code title} is set here.
+     */
+    private LinearLayout barView(android.content.Context ui, WmClient.Task task,
+                                 int width, int height, Caption c) {
         DexTheme theme = DexTheme.of(this);
         LinearLayout bar = new LinearLayout(ui);
         bar.setOrientation(LinearLayout.HORIZONTAL);
@@ -1405,6 +1456,31 @@ public final class CaptionService extends AccessibilityService {
         }
         bar.addView(button(ui, "✕", true, v -> onClose(task)), buttonParams(height));
         bar.setOnTouchListener(dragHandler(c, task, bar));
+        return bar;
+    }
+
+    private Caption build(WmClient.Task task, int width, int height) {
+        Display display = getSystemService(android.hardware.display.DisplayManager.class)
+                .getDisplay(task.displayId);
+        // Views MUST be inflated against the target display's Context, not the service's.
+        // The service's resources describe the phone panel (~450dpi); the desktop runs at
+        // its own — 160dpi on a 1x screen, 320 on a Retina one. Using the wrong one scales
+        // every sp/dp by up to ~2.8 and the caption comes out enormous.
+        final android.content.Context ui = createDisplayContext(display);
+
+        Caption c = new Caption();
+        c.taskId = task.taskId;
+        c.width = width;
+        c.height = height;
+        c.host = newHost(display);
+        if (c.host == null) return null;
+
+        LinearLayout bar = barView(ui, task, width, height, c);
+        if (bar == null) {
+            release(c);
+            return null;
+        }
+
 
         // The bar never quite reaches the window's edges: the resize bands live
         // in that margin, and a button sitting under one would answer the resize
@@ -2576,6 +2652,120 @@ public final class CaptionService extends AccessibilityService {
         curtainSince.remove(taskId);
         try {
             v.getContext().getSystemService(WindowManager.class).removeViewImmediate(v);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    // ── the bar drawn on the display, for a task nothing will host ──────────
+    //
+    // The last resort, and the one that answers the report that started it: on a
+    // Samsung desktop a window can be left wearing One UI's own caption — a ▢ and
+    // a ✕ and no minimise, because none of those are ours. The host search above
+    // is the fix for that, but only when the shell's caption window is in the
+    // accessibility list at all. When it is not, giving up leaves the user looking
+    // at the platform's bar, which is exactly the complaint.
+    //
+    // So the same bar goes up as a display-level TYPE_ACCESSIBILITY_OVERLAY at the
+    // task's caption strip instead. It is the arrangement the class javadoc calls
+    // the worse alternative — it has to be moved by the reconcile loop rather than
+    // by the compositor — but "a bar that trails the window by a frame" beats
+    // "no minimise button at all", and this path only ever runs for windows where
+    // the alternative was nothing.
+
+    /** taskId -> the bar we drew on the display for a task we could not host. */
+    private final SparseArray<Floating> floating = new SparseArray<>();
+
+    private static final class Floating {
+        View root;
+        TextView title;
+        int width;
+        int height;
+        int x;
+        int y;
+    }
+
+    /**
+     * Put our bar on the display over this task's caption strip, or keep the one
+     * already there in step with the window.
+     *
+     * Called from the reconcile loop on every pass while the task has no host, so a
+     * window that is dragged or resized has its bar follow it: the window manager
+     * moves the window, and the next pass moves this.
+     */
+    private void showFloatingBar(WmClient.Task task) {
+        final int width = task.right - task.left;
+        final int height = captionHeight(task.taskId);
+        if (width <= 0 || height <= 0) return;
+        try {
+            Floating f = floating.get(task.taskId);
+            if (f != null) {
+                final CharSequence want = labelFor(task);
+                if (!want.toString().contentEquals(f.title.getText())) f.title.setText(want);
+                if (f.x != task.left || f.y != task.top
+                        || f.width != width || f.height != height) {
+                    f.root.getContext().getSystemService(WindowManager.class)
+                            .updateViewLayout(f.root, floatingParams(task, width, height));
+                    f.x = task.left;
+                    f.y = task.top;
+                    f.width = width;
+                    f.height = height;
+                }
+                return;
+            }
+            Display display = getSystemService(android.hardware.display.DisplayManager.class)
+                    .getDisplay(task.displayId);
+            if (display == null) return;
+            android.content.Context ctx = createDisplayContext(display)
+                    .createWindowContext(
+                            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, null);
+            Caption c = new Caption();
+            c.taskId = task.taskId;
+            c.width = width;
+            c.height = height;
+            LinearLayout bar = barView(ctx, task, width, height, c);
+            if (bar == null) return;
+            ctx.getSystemService(WindowManager.class)
+                    .addView(bar, floatingParams(task, width, height));
+            Floating made = new Floating();
+            made.root = bar;
+            made.title = c.title;
+            made.width = width;
+            made.height = height;
+            made.x = task.left;
+            made.y = task.top;
+            floating.put(task.taskId, made);
+            noCurtain.add(task.taskId);      // this bar replaces the curtain
+            hideCurtain(task.taskId);
+            trace("floating bar task=" + task.taskId + " w=" + width + " h=" + height);
+        } catch (Throwable t) {
+            trace("floating bar failed task=" + task.taskId + ": " + t);
+        }
+    }
+
+    /**
+     * Placement for the fallback bar: the task's own caption strip, absolutely.
+     *
+     * Touchable, unlike the curtain — the buttons ARE the point — but never
+     * focusable, so the keyboard, back and the app's own focus stay where they were.
+     */
+    private static WindowManager.LayoutParams floatingParams(WmClient.Task task, int w, int h) {
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                w, h, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT);
+        lp.gravity = Gravity.TOP | Gravity.LEFT;
+        lp.x = task.left;
+        lp.y = task.top;
+        return lp;
+    }
+
+    private void hideFloatingBar(int taskId) {
+        Floating f = floating.get(taskId);
+        if (f == null) return;
+        floating.remove(taskId);
+        try {
+            f.root.getContext().getSystemService(WindowManager.class).removeViewImmediate(f.root);
         } catch (Throwable ignored) {
         }
     }
