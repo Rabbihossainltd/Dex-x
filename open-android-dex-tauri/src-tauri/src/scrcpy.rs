@@ -2429,6 +2429,26 @@ impl Enforcer {
         }
     }
 
+    /// Both rects a maximised window may be sitting on, whichever the launcher
+    /// believes the taskbar is doing.
+    ///
+    /// They are one bar-height apart and neither is wrong: the launcher keeps
+    /// its own copy of the auto-hide switch, and a row that says it changed can
+    /// land a beat after the window was resized. Recognising only the current
+    /// one would leave a correctly maximised window looking like it was dragged
+    /// to full width — which `window_state_pass` answers by pulling it back
+    /// into a window, i.e. a maximise that visibly does nothing.
+    fn maxed_rects(&self, density: i32) -> [(i32, i32, i32, i32); 2] {
+        let (w, h) = self.display_size.unwrap_or((1920, 1080));
+        let bar = taskbar_px(density);
+        [(0, 0, w - 4, h - bar), (0, 0, w - 4, h)]
+    }
+
+    /// Is this rect one of the two maximise pins? See [`Self::maxed_rects`].
+    fn at_max_pin(&self, b: (i32, i32, i32, i32), density: i32) -> bool {
+        self.maxed_rects(density).iter().any(|m| near(b, *m))
+    }
+
     /// Rect a maximized window occupies: the whole display bar the taskbar
     /// strip — or the whole display, while the bar steers clear of it.
     ///
@@ -2826,8 +2846,14 @@ impl Enforcer {
             // fullscreen mode, and treating that as arrived cleared `pending`
             // one tick before the mode caught up — so the still-fullscreen
             // task read as a second press and instantly un-maximized.
+            // Either pin counts for a maximise target, for the reason spelled
+            // out on maxed_rects: a window the launcher maximised to the other
+            // height IS at its target, and treating it as "not there yet"
+            // re-issues the same rect until the attempt budget runs out and the
+            // window gets parked — which reads as a maximise that does nothing.
+            let want_rects = [max_rect, self.maxed_rect(density).unwrap_or(max_rect)];
             let at_target = if want {
-                !filling && rec.bounds.is_some_and(|b| near(b, max_rect))
+                !filling && rec.bounds.is_some_and(|b| want_rects.iter().any(|m| near(b, *m)))
             } else {
                 !filling
             };
@@ -2891,7 +2917,7 @@ impl Enforcer {
             // because the caption bar applies the display-wide rect and cannot
             // know the app asked for portrait.
             let at_pin = rec.bounds.is_some_and(|b| {
-                near(b, max_rect) || self.maxed_rect(density).is_some_and(|m| near(b, m))
+                near(b, max_rect) || self.at_max_pin(b, density)
             });
 
             if filling {

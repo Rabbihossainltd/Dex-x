@@ -425,6 +425,8 @@ public final class CaptionService extends AccessibilityService {
      * takes it off this list, and the grace applies again.
      */
     private final Set<Integer> captionlessDisplays = new HashSet<>();
+    /** Tasks already reported as wearing no caption of ours — one log line each. */
+    private final Set<Integer> diagnosed = new HashSet<>();
 
     private boolean captionless(int displayId) {
         return captionlessDisplays.contains(displayId) && !hostDisplays.contains(displayId);
@@ -443,6 +445,17 @@ public final class CaptionService extends AccessibilityService {
         int taskId;
         int width;
         int height;
+        /**
+         * Whether this bar was built with the two snap buttons.
+         *
+         * The button set is chosen from the width at BUILD time, and the bar is
+         * resized in place for the rest of its life — so a window widened past
+         * the threshold (or narrowed below it) kept the set picked for the old
+         * size. Widened, that is a bar missing ◧ ◨ it has room for; narrowed,
+         * it is the old "no minimise button" bug wearing a different hat. The
+         * flag is what lets syncCaption notice and ask for a rebuild.
+         */
+        boolean snaps;
         /** Accessibility window this is attached to; changes when the host is recreated. */
         int windowId;
     }
@@ -897,6 +910,23 @@ public final class CaptionService extends AccessibilityService {
                 // working caption whose host just blinked out), and give up after
                 // CURTAIN_MAX_MS so a window that never yields a host is not left with a dead
                 // bar.
+                // Say WHY, once per task, so a window that wears no caption of
+                // ours can be diagnosed from the log instead of guessed at:
+                // how long it has waited, what the window list did contain, and
+                // whether the display is one the shell draws captions on.
+                if (hostWaitSince.containsKey(t.taskId)
+                        && captions.get(t.taskId) == null && !noCurtain.contains(t.taskId)) {
+                    Long waited = hostWaitSince.get(t.taskId);
+                    long ms = waited == null ? 0 : SystemClock.uptimeMillis() - waited;
+                    if (ms > 5000 && !diagnosed.contains(t.taskId)) {
+                        diagnosed.add(t.taskId);
+                        trace("no caption host for task " + t.taskId + " after " + ms + "ms"
+                                + " (windows=" + windows.size()
+                                + ", captionlessDisplay=" + captionless(display)
+                                + ", task=" + t.left + "," + t.top + "," + t.right + ","
+                                + t.bottom + ") — wearing a curtain, not a bar");
+                    }
+                }
                 if (captions.get(t.taskId) == null && !noCurtain.contains(t.taskId)) {
                     Long since = curtainSince.get(t.taskId);
                     if (since != null
@@ -1204,6 +1234,17 @@ public final class CaptionService extends AccessibilityService {
         int width = task.right - task.left;
         int height = captionHeight(task.taskId);
         if (c.width == width && c.height == height) return true;
+        // The button set is a function of the width, and the set this bar
+        // carries was chosen for the width it was BUILT at. When the answer
+        // changes the bar has to be made again — a relayout would only stretch
+        // a bar that is wearing the wrong buttons.
+        if (roomForSnaps(width) != c.snaps && !WidgetDetourActivity.isDetourTask(task.taskId)) {
+            return false;
+        }
+        if (roomForSnaps(width) != c.snaps) {
+            // a detour bar has no snaps at all: relayout and let it be
+            c.snaps = roomForSnaps(width);
+        }
         if (!relayout(c.host, width, height)) return false;   // caller rebuilds
         c.width = width;
         c.height = height;
@@ -1335,8 +1376,8 @@ public final class CaptionService extends AccessibilityService {
         // option". Decide from the surface's own width instead: the close, the
         // minimise, the maximise and the resize grip are fixed costs, and the
         // two snap buttons are given up first when there is no room for them.
-        final int budget = width - px(10) - 2 * px(CaptionChrome.bandDp());
-        final boolean roomForSnaps = !detour && budget >= btnPx * 6 + px(70);
+        final boolean roomForSnaps = !detour && roomForSnaps(width);
+        c.snaps = roomForSnaps;
         if (!detour) {
             if (roomForSnaps) {
                 bar.addView(button(ui, "◧", false, v -> onSnapLeft(task)), buttonParams(height));
@@ -1378,6 +1419,20 @@ public final class CaptionService extends AccessibilityService {
     /** The width of every caption button, in the desktop display's px. */
     private int buttonWidth() {
         return px(DexTheme.of(this).win11 ? 46 : 38);
+    }
+
+    /**
+     * Is this bar wide enough for the two snap buttons?
+     *
+     * The fixed costs are close, minimise, maximise, the resize grip and the
+     * gap the resize bands need at either end; the snaps are what is given up
+     * first. Read by {@link #build} when the bar is made and by
+     * {@link #syncCaption} on every resize, so the two can never disagree about
+     * which set a given width deserves.
+     */
+    private boolean roomForSnaps(int width) {
+        int budget = width - px(10) - 2 * px(CaptionChrome.bandDp());
+        return budget >= buttonWidth() * 6 + px(70);
     }
 
     /**
@@ -2032,7 +2087,7 @@ public final class CaptionService extends AccessibilityService {
         // can be several resizes old.
         final WmClient.Task live = tasks.containsKey(id) ? tasks.get(id) : task;
         final int[] max = maxRect(display);
-        if (near(live, max)) {
+        if (isMaxed(live)) {
             maximized.remove(id);
             int[] r = restoreBounds.remove(id);
             // Never "restore" to the window's current rect: at this point that IS the
@@ -2175,6 +2230,32 @@ public final class CaptionService extends AccessibilityService {
     private int[] maxRect(int display) {
         final android.graphics.Point size = displaySize(display);
         return new int[]{0, 0, size.x - 4, size.y - barPx(display)};
+    }
+
+    /**
+     * Is this window sitting on a maximise pin — either one?
+     *
+     * The pin's height follows the taskbar: with auto-hide on it reaches the
+     * display's edge, with it off it stops above the bar. That preference is
+     * also known to the PC, which computes the same rect for the windows it
+     * pins, but the two copies can be a beat apart — a fresh session starts
+     * with the PC's default until the launcher's first `taskbar` row lands, and
+     * a toggle arrives at both ends at slightly different times. When they
+     * disagree, a strict test would look at a maximised window and call it
+     * "not maximised", so ▢ would maximise it onto the rect it is already
+     * sitting on and the button would read as dead — the window could not be
+     * restored at all.
+     *
+     * Both heights therefore count as "maximised". The cost of being wrong is
+     * one restored window in an edge case; the cost of being strict is a
+     * maximise that cannot be undone.
+     */
+    private boolean isMaxed(WmClient.Task task) {
+        if (task == null) return false;
+        android.graphics.Point size = displaySize(task.displayId);
+        int[] withBar = {0, 0, size.x - 4, size.y - taskbarPx(task.displayId)};
+        int[] without = {0, 0, size.x - 4, size.y};
+        return near(task, withBar) || near(task, without) || near(task, maxRect(task.displayId));
     }
 
     /**

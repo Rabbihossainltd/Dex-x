@@ -313,6 +313,15 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     private TextView clockView;
     private TextView dateView;
     private LinearLayout openAppsRow;
+    /**
+     * The ◁ ○ ▢ cluster this taskbar draws, when it draws one.
+     *
+     * Null on the phone's dock, and null whenever the platform's own navigation
+     * bar is on screen — two sets of the same three buttons stacked one above
+     * the other is the "why are the phone's navigation buttons here twice"
+     * report. See syncNavCluster.
+     */
+    private View navCluster;
     private EditText searchField;
     /** Drawer window root: the panel plus the drag layer painted over it. */
     private DrawerRoot drawer;
@@ -369,8 +378,14 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     // {@link #PEEK_DP} of pixels are what stays on screen, so the user has a
     // line to aim at rather than empty space.
 
-    /** The sliver of the bar that stays on screen while it is hidden. */
-    private static final int PEEK_DP = 4;
+    /**
+     * The sliver of the bar that stays on screen while it is hidden.
+     *
+     * The whole overlay window is this tall while away, which is what stops a
+     * hidden bar from eating clicks, and what the pointer has to reach to bring
+     * it back. The line drawn inside it is a little shorter.
+     */
+    private static final int PEEK_DP = 6;
     /** After the pointer leaves, how long the bar lingers before going. */
     private static final long COLLAPSE_DELAY_MS = 650;
     /** With no hover at all for this long, it goes anyway — the pointer may have left the screen. */
@@ -393,10 +408,35 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
      * it does, so hover can be acted on whatever the bar is showing.
      */
     private final class TaskbarHost extends FrameLayout {
+        /**
+         * The line left on screen while the bar is away.
+         *
+         * It exists because the bar itself cannot be what a hidden bar shows: a
+         * window four pixels tall clips the bar to its first four pixels, and
+         * those are the top of the strip's padding — nothing at all. On a dark
+         * app that leaves a hidden taskbar completely invisible, which is how a
+         * maximised window ends up looking like a desktop that has gone away.
+         * A drawn line is always there to aim at, in the accent colour, so the
+         * way back is visible rather than merely present.
+         */
+        final View peek;
+
         TaskbarHost(Context ctx) {
             super(ctx);
             setClipChildren(false);
             setClipToPadding(false);
+            peek = new View(ctx);
+            GradientDrawable g = new GradientDrawable();
+            g.setColor(DexTheme.of(LauncherActivity.this).accent);
+            g.setCornerRadius(dp(2));
+            peek.setBackground(g);
+            peek.setAlpha(0.8f);
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(4), Gravity.BOTTOM);
+            lp.leftMargin = dp(18);
+            lp.rightMargin = dp(18);
+            addView(peek, lp);
+            peek.setVisibility(GONE);
         }
 
         @Override
@@ -431,6 +471,88 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         }
     }
 
+    /**
+     * Show our navigation cluster only when the platform is not drawing one.
+     *
+     * Called when the bar is built and again whenever the insets may have
+     * moved (see {@link #watchSystemBars}), because the platform's bar comes and
+     * goes with focus: it is there while an app window is in front and gone
+     * while ours is. The test is the bottom system-bar inset, which reports what
+     * is ON SCREEN rather than what could be.
+     */
+    private void syncNavCluster() {
+        if (navCluster == null) return;
+        boolean platformBar = !onPhone() && bottomSystemInset() > dp(6);
+        int want = platformBar ? View.GONE : View.VISIBLE;
+        if (navCluster.getVisibility() != want) {
+            navCluster.setVisibility(want);
+            DexLog.step("taskbar", platformBar
+                    ? "platform navigation bar is on screen — hiding ours"
+                    : "no platform navigation bar — drawing our nav keys");
+        }
+    }
+
+    /**
+     * Re-check the system bars whenever this window is laid out again.
+     *
+     * An inset change is the only signal Android gives that the platform's
+     * navigation bar appeared or went away, and it arrives as a re-layout of
+     * this window (or, when the desktop is behind an app window, not at all —
+     * hence the periodic check the taskbar's tick already provides).
+     */
+    private void watchSystemBars() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return;
+        View root = getWindow() == null ? null : getWindow().getDecorView();
+        if (root == null) return;
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            syncNavCluster();
+            return v.onApplyWindowInsets(insets);
+        });
+    }
+
+    /**
+     * Ask the platform to keep its status and navigation bars off the desktop.
+     *
+     * A desktop that shows Android's nav bar at the bottom is a desktop whose
+     * taskbar sits above a strip of phone buttons doing the same three things —
+     * and whose usable height is 40-odd pixels short. Immersive sticky is the
+     * per-window, non-invasive way to take them away: it needs no settings of
+     * the phone's to be rewritten, it ends with this window, and swiping the
+     * edge still brings the bars back if someone wants them.
+     */
+    private void hideSystemBars() {
+        if (onPhone()) return;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                android.view.WindowInsetsController c = getWindow().getInsetsController();
+                if (c == null) return;
+                c.setSystemBarsBehavior(
+                        android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                c.hide(android.view.WindowInsets.Type.systemBars());
+            } else {
+                getWindow().getDecorView().setSystemUiVisibility(
+                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                                | View.SYSTEM_UI_FLAG_FULLSCREEN
+                                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+            }
+        } catch (Throwable t) {
+            DexLog.warn("taskbar", "could not hide the system bars", t);
+        }
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (!hasFocus) return;
+        // Focus is when the platform re-asserts its bars (a transient swipe, a
+        // return from another window), so it is when they are taken away again.
+        hideSystemBars();
+        handler.postDelayed(this::syncNavCluster, 120);
+    }
+
     /** Is the bar set to slide away? Never on the phone's own dock. */
     boolean taskbarAutohide() {
         return !onPhone() && DexPrefs.getBool(this, DexPrefs.KEY_TASKBAR_AUTOHIDE, true);
@@ -451,7 +573,9 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
             DexLog.warn("taskbar", "cannot reveal", e);
             return;
         }
+        if (taskbarHost instanceof TaskbarHost) ((TaskbarHost) taskbarHost).peek.setVisibility(View.GONE);
         taskbarView.setAlpha(1f);
+        taskbarView.setVisibility(View.VISIBLE);
         // Starting from where the peek strip was, so the bar reads as sliding
         // up out of the edge rather than as appearing.
         taskbarView.setTranslationY(dp(TASKBAR_DP - PEEK_DP));
@@ -476,12 +600,15 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
             taskbarHidden = false;
             return;
         }
-        // The bar is taller than the window it is in now, so what stays visible
-        // is its top few pixels — the line to aim at — and everything under
-        // them is clipped, not drawn over the app.
+        // The bar is taller than the window it is in now, so everything past the
+        // window's few pixels is clipped — that is what stops a hidden bar from
+        // eating clicks meant for the app. It is hidden outright as well, and
+        // the peek line takes its place: see TaskbarHost.peek.
         taskbarView.animate().cancel();
         taskbarView.setTranslationY(0f);
-        taskbarView.setAlpha(1f);
+        taskbarView.setAlpha(0f);
+        taskbarView.setVisibility(View.INVISIBLE);
+        if (taskbarHost instanceof TaskbarHost) ((TaskbarHost) taskbarHost).peek.setVisibility(View.VISIBLE);
     }
 
     /**
@@ -908,6 +1035,12 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         @Override
         public void run() {
             updateClock();
+            // The desktop spends most of a session behind app windows, and an
+            // app that shows the platform's navigation bar brings it back for
+            // the whole display. Nothing is dispatched to a window that is not
+            // in front, so this is the backstop: a nav cluster that duplicates
+            // one on screen is corrected within half a minute at the latest.
+            syncNavCluster();
             handler.postDelayed(this, 30_000);
         }
     };
@@ -1028,6 +1161,11 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
                 + " at " + uiDensity + "dpi, " + displayWidthDp() + "dp wide"
                 + (compact ? " — compact chrome" : ""));
         theme = DexTheme.of(this);
+        // Before the first frame: a desktop that opens with the phone's status
+        // and navigation bars on it has already drawn them once by the time
+        // focus arrives. No-op on the phone's own screen.
+        hideSystemBars();
+        watchSystemBars();
         loadRecents();
         rememberBaseDpi(getIntent());
         reapplyDensity();
@@ -1398,6 +1536,8 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     protected void onResume() {
         super.onResume();
         handler.post(clockTick);
+        hideSystemBars();
+        handler.postDelayed(this::syncNavCluster, 200);
     }
 
     @Override
@@ -3926,6 +4066,13 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     private View buildTaskbar() {
         if (onPhone()) return buildPhoneDock();
         View nav = theme.win11 ? buildWin11NavCluster() : buildNavCluster();
+        navCluster = nav;
+        // The desktop display may be showing Android's own navigation bar along
+        // its bottom edge — a display created without system decorations is not
+        // supposed to, but a phone whose desktop mode insists (and every phone
+        // on an early Android) will. Ours is the one that must give way: the
+        // platform's is a system bar and cannot be taken down by an app.
+        syncNavCluster();
         View apps = theme.win11 ? buildWin11Cluster() : buildAppsCluster();
         View tray = buildTrayCluster();
 
