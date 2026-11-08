@@ -353,6 +353,177 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     private float drawerRawX, drawerRawY;
     private View taskbarView;
     private boolean taskbarOverlay = false;
+
+    // ── taskbar auto-hide ───────────────────────────────────────────────────
+    //
+    // What the DeX-on-a-monitor feel is: the pointer leaves the bar, the bar
+    // slides away, and a maximised window is then the WHOLE screen — its rows
+    // at the bottom included, which is the point of maximising. Move the
+    // pointer to the bottom edge and the bar comes back.
+    //
+    // The mechanism is a geometry change on the overlay window rather than a
+    // translation alone: a 52dp window that is merely transparent would still
+    // eat the bottom 52dp of every click, so the window itself shrinks to
+    // {@link #PEEK_DP} while hidden. That strip is the hot zone — the same few
+    // pixels Windows' own auto-hidden bar keeps — and the bar's first
+    // {@link #PEEK_DP} of pixels are what stays on screen, so the user has a
+    // line to aim at rather than empty space.
+
+    /** The sliver of the bar that stays on screen while it is hidden. */
+    private static final int PEEK_DP = 4;
+    /** After the pointer leaves, how long the bar lingers before going. */
+    private static final long COLLAPSE_DELAY_MS = 650;
+    /** With no hover at all for this long, it goes anyway — the pointer may have left the screen. */
+    private static final long COLLAPSE_IDLE_MS = 2600;
+
+    /** Wrapper the taskbar overlay is added inside; it is what hears hover. */
+    private FrameLayout taskbarHost;
+    /** The overlay's LayoutParams, kept so the height can be changed in place. */
+    private WindowManager.LayoutParams taskbarLp;
+    private boolean taskbarHidden;
+    private boolean taskbarHovered;
+
+    private final Runnable collapseTaskbar = this::collapseTaskbarNow;
+    private final Runnable collapseIdle = () -> {
+        if (!taskbarHovered) collapseTaskbarNow();
+    };
+
+    /**
+     * The overlay's root: a frame that sees the pointer before anything inside
+     * it does, so hover can be acted on whatever the bar is showing.
+     */
+    private final class TaskbarHost extends FrameLayout {
+        TaskbarHost(Context ctx) {
+            super(ctx);
+            setClipChildren(false);
+            setClipToPadding(false);
+        }
+
+        @Override
+        public boolean dispatchHoverEvent(android.view.MotionEvent e) {
+            switch (e.getActionMasked()) {
+                case android.view.MotionEvent.ACTION_HOVER_ENTER:
+                case android.view.MotionEvent.ACTION_HOVER_MOVE:
+                    taskbarHovered = true;
+                    revealTaskbar();
+                    break;
+                case android.view.MotionEvent.ACTION_HOVER_EXIT:
+                    taskbarHovered = false;
+                    scheduleTaskbarCollapse();
+                    break;
+                default:
+                    break;
+            }
+            return super.dispatchHoverEvent(e);
+        }
+
+        @Override
+        public boolean onInterceptTouchEvent(android.view.MotionEvent e) {
+            // While hidden the window is a few pixels tall, so this only ever
+            // runs for a press on the peek strip: it brings the bar back and
+            // the press goes no further. Without this a tap there would land on
+            // whatever button happens to be at the top of the bar.
+            if (taskbarHidden) {
+                revealTaskbar();
+                return true;
+            }
+            return false;
+        }
+    }
+
+    /** Is the bar set to slide away? Never on the phone's own dock. */
+    boolean taskbarAutohide() {
+        return !onPhone() && DexPrefs.getBool(this, DexPrefs.KEY_TASKBAR_AUTOHIDE, true);
+    }
+
+    /** Slide the bar back in, and re-arm the idle timer that puts it away again. */
+    void revealTaskbar() {
+        if (taskbarHost == null || !taskbarOverlay) return;
+        handler.removeCallbacks(collapseTaskbar);
+        handler.removeCallbacks(collapseIdle);
+        handler.postDelayed(collapseIdle, COLLAPSE_IDLE_MS);
+        if (!taskbarHidden) return;
+        taskbarHidden = false;
+        try {
+            taskbarLp.height = dp(TASKBAR_DP);
+            getWindowManager().updateViewLayout(taskbarHost, taskbarLp);
+        } catch (Exception e) {
+            DexLog.warn("taskbar", "cannot reveal", e);
+            return;
+        }
+        taskbarView.setAlpha(1f);
+        // Starting from where the peek strip was, so the bar reads as sliding
+        // up out of the edge rather than as appearing.
+        taskbarView.setTranslationY(dp(TASKBAR_DP - PEEK_DP));
+        taskbarView.animate().translationY(0f).setDuration(130).start();
+    }
+
+    private void scheduleTaskbarCollapse() {
+        if (taskbarHost == null || !taskbarOverlay || !taskbarAutohide()) return;
+        handler.removeCallbacks(collapseTaskbar);
+        handler.postDelayed(collapseTaskbar, COLLAPSE_DELAY_MS);
+    }
+
+    private void collapseTaskbarNow() {
+        if (taskbarHost == null || !taskbarOverlay || !taskbarAutohide()) return;
+        if (taskbarHovered || taskbarHidden) return;
+        taskbarHidden = true;
+        try {
+            taskbarLp.height = dp(PEEK_DP);
+            getWindowManager().updateViewLayout(taskbarHost, taskbarLp);
+        } catch (Exception e) {
+            DexLog.warn("taskbar", "cannot hide", e);
+            taskbarHidden = false;
+            return;
+        }
+        // The bar is taller than the window it is in now, so what stays visible
+        // is its top few pixels — the line to aim at — and everything under
+        // them is clipped, not drawn over the app.
+        taskbarView.animate().cancel();
+        taskbarView.setTranslationY(0f);
+        taskbarView.setAlpha(1f);
+    }
+
+    /**
+     * Turn auto-hide on or off from the desktop's own menu.
+     *
+     * Told to the PC as well, because maximise is a rect it computes too: with
+     * the bar away a maximised window has to reach the bottom of the screen
+     * (scrcpy.rs, maxed_rect). One request row, drained by the same pump as
+     * everything else on that channel.
+     */
+    void setTaskbarAutohide(boolean on) {
+        // The write broadcasts, and settingsReceiver lands back in
+        // applyTaskbarAutohide — one path whether the switch is flipped here on
+        // the desktop or in the Settings window.
+        DexPrefs.put(this, DexPrefs.KEY_TASKBAR_AUTOHIDE, on);
+        applyTaskbarAutohide();
+    }
+
+    /**
+     * Read the preference and put the bar in that state, now.
+     *
+     * Called by the settings write. Off means the bar is revealed and stays
+     * that way; on means it holds position until the pointer leaves it.
+     */
+    void applyTaskbarAutohide() {
+        announceTaskbarAutohide();
+        if (!taskbarAutohide()) {
+            revealTaskbar();
+            handler.removeCallbacks(collapseTaskbar);
+            return;
+        }
+        if (!taskbarHovered) {
+            handler.removeCallbacks(collapseTaskbar);
+            handler.postDelayed(collapseTaskbar, COLLAPSE_DELAY_MS);
+        }
+    }
+
+    /** Tell the PC which way the bar behaves, so its maximise agrees with ours. */
+    private void announceTaskbarAutohide() {
+        if (onPhone()) return;
+        RequestProvider.enqueue("taskbar", taskbarAutohide() ? "autohide.on" : "autohide.off");
+    }
     /** The phone dock's Mouse button, so it can show the touchpad's state. */
     private TextView padButton;
     /** The phone's touchpad and pointer; null until asked for. See {@link DexPointer}. */
@@ -799,6 +970,13 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
                 maybeOfferTouchpad();
                 return;
             }
+            // Auto-hide is a window property, not a drawing: the bar is not
+            // rebuilt for it, it is resized into place. Returning here also
+            // keeps a toggle from repainting the taskbar it is toggling.
+            if (DexPrefs.KEY_TASKBAR_AUTOHIDE.equals(key)) {
+                applyTaskbarAutohide();
+                return;
+            }
             if (!DexPrefs.affectsShell(key)) return;        // a desktop-app setting
             if (DexPrefs.KEY_LANGUAGE.equals(key) || "*".equals(key)) {
                 // Resources were resolved against the old locale in
@@ -1201,12 +1379,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
             TouchpadNotice.hide(this);
             Touchpad.closeAll();
         }
-        if (taskbarOverlay && taskbarView != null) {
-            try {
-                getWindowManager().removeViewImmediate(taskbarView);
-            } catch (Exception ignored) {
-            }
-        }
+        detachTaskbarWindow();
     }
 
     @Override
@@ -1386,11 +1559,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         }
         if (taskbarView != null) {
             if (taskbarOverlay) {
-                try {
-                    getWindowManager().removeViewImmediate(taskbarView);
-                } catch (Exception ignored) {
-                }
-                taskbarOverlay = false;
+                detachTaskbarWindow();
             } else if (rootFrame != null) {
                 rootFrame.removeView(taskbarView);
             }
@@ -1728,6 +1897,32 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
                 && (display.getFlags() & DISPLAY_FLAG_TRUSTED) == 0;
     }
 
+    /**
+     * Take the bar's overlay window down.
+     *
+     * The window is the {@link TaskbarHost} frame now, not the bar itself —
+     * removing the bar from a window it is no longer in would throw, and the
+     * timers would keep firing at a window that is gone.
+     */
+    private void detachTaskbarWindow() {
+        handler.removeCallbacks(collapseTaskbar);
+        handler.removeCallbacks(collapseIdle);
+        taskbarHovered = false;
+        taskbarHidden = false;
+        if (!taskbarOverlay) {
+            taskbarHost = null;
+            return;
+        }
+        taskbarOverlay = false;
+        View win = taskbarHost != null ? taskbarHost : taskbarView;
+        taskbarHost = null;
+        if (win == null) return;
+        try {
+            getWindowManager().removeViewImmediate(win);
+        } catch (Exception ignored) {
+        }
+    }
+
     /** Add the taskbar as an always-on-top overlay window; false if not permitted. */
     private boolean attachTaskbarOverlay() {
         if (overlaysBuried()) {
@@ -1753,13 +1948,31 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         // different thing — it is the touchpad underneath it, not an inset.
         barLp.gravity = dock ? (Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL) : Gravity.BOTTOM;
         barLp.y = dockLift();
+        // The bar goes inside a frame of ours: hover has to be heard on the
+        // whole window, including the padding around its buttons, and the
+        // window is what auto-hide resizes — see TaskbarHost.
+        taskbarHost = new TaskbarHost(this);
+        taskbarHost.addView(taskbarView,
+                new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                        dp(TASKBAR_DP)));
+        taskbarLp = barLp;
         try {
-            getWindowManager().addView(taskbarView, barLp);
+            getWindowManager().addView(taskbarHost, barLp);
         } catch (Exception e) {
             DexLog.warn("taskbar", "overlay window rejected", e);
+            taskbarHost = null;
             return false;
         }
         taskbarOverlay = true;
+        // A rebuild (density change, a settings round trip) lands here with the
+        // preference already off or on; a fresh window always starts revealed,
+        // and the idle timer below is what puts it away.
+        taskbarHidden = false;
+        if (taskbarAutohide()) {
+            handler.removeCallbacks(collapseIdle);
+            handler.postDelayed(collapseIdle, COLLAPSE_IDLE_MS);
+        }
+        announceTaskbarAutohide();
         return true;
     }
 

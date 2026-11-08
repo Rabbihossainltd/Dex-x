@@ -169,6 +169,17 @@ final class DexPrefs {
     /** A ringing call raises a banner with answer/decline over the desktop. */
     static final String KEY_NOTIF_CALLS = "notifications_calls";
 
+    /**
+     * Does the taskbar slide away when the pointer leaves it, and come back
+     * when the pointer reaches the bottom edge?
+     *
+     * On by default on a desktop display — a maximised window is then the whole
+     * screen, which is what a maximised window is for, and the bar is one
+     * pointer-move away. Off on the phone's own dock, where there is no pointer
+     * to bring it back with.
+     */
+    static final String KEY_TASKBAR_AUTOHIDE = "taskbar_autohide";
+
     // ── Mouse & cursor ──
     // Everything here except KEY_MOUSE_MODE is drawn by us, on our own
     // windows, by DexCursors. The platform will not scale a custom pointer

@@ -2120,6 +2120,24 @@ pub struct Shared {
     /// gesture engine, drained by the task poller — that is the side that
     /// knows task ids, windowing modes and bounds.
     pub(crate) window_reqs: Mutex<Vec<String>>,
+    /// Does the launcher's taskbar hide itself when the pointer leaves it?
+    ///
+    /// Written by the request pump from the launcher's `taskbar` row, read by
+    /// the task poller when it computes a maximised rect. With the bar away
+    /// there is nothing at the bottom of the screen to leave room for, so a
+    /// maximised window has to end at the display's edge instead of 52dp
+    /// above it — otherwise every maximise would carry a dead strip.
+    ///
+    /// false until the launcher says otherwise: an older launcher APK has a
+    /// permanent bar, and keeping room for it is the safe direction.
+    taskbar_autohide: AtomicBool,
+    /// Set when the taskbar's auto-hide state flips, so every maximised
+    /// window is re-fitted to the rect that state implies.
+    ///
+    /// Without it the change is felt one press at a time: a window already on
+    /// our old pin is not "near" the new one, and the poll only re-fits a task
+    /// it believes is mid-transition.
+    regrow: AtomicBool,
     /// Set by the request pump when a `cursor` request has just added the
     /// pointer-speed row to the restore snapshot.
     ///
@@ -2150,6 +2168,19 @@ impl Shared {
     pub(crate) fn record_fullscreen(&self, on: bool) {
         self.fs_on.store(on, Ordering::SeqCst);
         self.resync.store(true, Ordering::SeqCst);
+    }
+
+    /// Is the launcher's taskbar allowed to slide away?
+    ///
+    /// Drives nothing but the geometry below, so it needs no re-broadcast: the
+    /// next task poll reads it and the window it is looking at gets the new
+    /// rect on the same pass.
+    pub(crate) fn taskbar_autohide(&self) -> bool {
+        self.taskbar_autohide.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn set_taskbar_autohide(&self, on: bool) {
+        self.taskbar_autohide.store(on, Ordering::SeqCst);
     }
 }
 
@@ -2358,12 +2389,22 @@ impl Enforcer {
         b.0 <= 4 && b.2 >= w - 1 && (b.2 - b.0) >= w * 9 / 10
     }
 
+    /// Vertical room the taskbar takes from a maximised window: none while it
+    /// hides itself, the bar's own height while it does not.
+    fn bar_px(&self, density: i32) -> i32 {
+        if self.shared.taskbar_autohide() {
+            0
+        } else {
+            taskbar_px(density)
+        }
+    }
+
     /// A window shaped like the phone: full height above the taskbar, width
     /// from the phone's own aspect, centred. What a portrait-locked app gets
     /// instead of a landscape rect it would only stretch across.
     fn phone_rect(&self, density: i32) -> Option<(i32, i32, i32, i32)> {
         let (w, h) = self.display_size?;
-        let ph = h - taskbar_px(density);
+        let ph = h - self.bar_px(density);
         let pw = ((ph as f32) * self.phone_aspect).round() as i32;
         // never wider than the display, and never so narrow it is unusable
         let pw = pw.clamp(320.min(w), w - 4);
@@ -2389,12 +2430,16 @@ impl Enforcer {
     }
 
     /// Rect a maximized window occupies: the whole display bar the taskbar
-    /// strip. The 4px width inset is load-bearing — it is how a window WE
-    /// maximized is told apart from one One UI just made full-width, which
-    /// is the signal we react to (see fullwidth_pass).
+    /// strip — or the whole display, while the bar steers clear of it.
+    ///
+    /// The 4px width inset is load-bearing — it is how a window WE maximized
+    /// is told apart from one One UI just made full-width, which is the signal
+    /// we react to (see fullwidth_pass). The height carries no such meaning, so
+    /// with the bar hidden the rect reaches the bottom edge: that is the point
+    /// of the feature, a maximised window with no dead strip under it.
     fn maxed_rect(&self, density: i32) -> Option<(i32, i32, i32, i32)> {
         let (w, h) = self.display_size?;
-        Some((0, 0, w - 4, h - taskbar_px(density)))
+        Some((0, 0, w - 4, h - self.bar_px(density)))
     }
 
     /// Log every task that changed display since the last poll.
@@ -2692,10 +2737,15 @@ impl Enforcer {
         let Some(max_rect) = self.maxed_rect(density) else {
             return;
         };
-        // The display changed size under maximised windows. Left alone they
-        // would read as "resized by hand" below and drop to windowed; they are
-        // maximised, so they are fitted to the display as it is now.
-        if std::mem::take(&mut self.refit) {
+        // The display changed size under maximised windows — or the taskbar
+        // did, which is the same thing to them: the rect a maximise lands on
+        // moved. Left alone they would read as "resized by hand" below and
+        // drop to windowed, so they are fitted to the new rect instead.
+        //
+        // Both flags mean exactly this, so they are drained together: `refit`
+        // is raised here when the display itself changed, `regrow` by the
+        // request pump when the launcher turned auto-hide on or off.
+        if std::mem::take(&mut self.refit) | self.shared.regrow.swap(false, Ordering::SeqCst) {
             let maxed: Vec<u32> = self.wins.iter().filter(|(_, w)| w.maxed).map(|(id, _)| *id).collect();
             for rec in tasks.iter().filter(|t| maxed.contains(&t.id)) {
                 log::info!("freeform-enforcer [{}] task {} re-fitted to the display", self.key, rec.id);
@@ -3112,6 +3162,21 @@ impl RequestPump {
                 }
                 // consume even on error — retrying can't conjure a window,
                 // and a toggle must never replay from a stale queue
+                true
+            } else if cmd == "taskbar" {
+                // The bar's own behaviour, as "<what>.<state>". Auto-hide is
+                // the only setting here: it decides how tall a maximised
+                // window is, so the poller has to hear about it the moment it
+                // changes rather than at the next session.
+                let (what, state) = arg.rsplit_once('.').unwrap_or((arg, "on"));
+                if what == "autohide" {
+                    let on = state == "on";
+                    if on != self.shared.taskbar_autohide() {
+                        log::info!("request-pump [{}] taskbar auto-hide: {on}", self.key);
+                        self.shared.set_taskbar_autohide(on);
+                        self.shared.regrow.store(true, Ordering::SeqCst);
+                    }
+                }
                 true
             } else if cmd == "window" {
                 // Maximize/restore the app's window, asked for from the

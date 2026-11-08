@@ -840,6 +840,16 @@ class DesktopGrid extends ViewGroup {
                             host::openDisplaySize),
                     new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT,
                             LayoutParams.WRAP_CONTENT));
+            // The label carries the state: a menu row that toggles has no
+            // switch of its own, and the panel closes on the click — so the
+            // next time it is opened is the only place the new state can show.
+            boolean autohide = host.taskbarAutohide();
+            panel.addView(menuRow(host.getString(autohide
+                                    ? R.string.lx_taskbar_autohide_on
+                                    : R.string.lx_taskbar_autohide_off),
+                            () -> host.setTaskbarAutohide(!host.taskbarAutohide())),
+                    new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT,
+                            LayoutParams.WRAP_CONTENT));
         }
         showPanelAtPointer(panel, null);
     }

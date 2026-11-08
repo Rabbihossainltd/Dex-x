@@ -1823,7 +1823,7 @@ public final class CaptionService extends AccessibilityService {
         int edge = px(24);
         // Above this the window is not being "moved to an edge", it is being
         // dropped somewhere near one.
-        if (winY < 0 || winY > size.y - taskbarPx(display)) return;
+        if (winY < 0 || winY > size.y - barPx(display)) return;
         boolean left = winX <= edge;
         boolean right = winX + (task.right - task.left) >= size.x - edge;
         if (!left && !right) return;
@@ -1970,7 +1970,7 @@ public final class CaptionService extends AccessibilityService {
         maximized.remove(id);
         final android.graphics.Point size = displaySize(display);
         final int half = size.x / 2;
-        final int bottom = size.y - taskbarPx(display);
+        final int bottom = size.y - barPx(display);
         if (left) {
             wm.post(() -> wm.resize(display, id, 0, 0, half, bottom, px));
         } else {
@@ -2062,7 +2062,22 @@ public final class CaptionService extends AccessibilityService {
      */
     private int[] maxRect(int display) {
         final android.graphics.Point size = displaySize(display);
-        return new int[]{0, 0, size.x - 4, size.y - taskbarPx(display)};
+        return new int[]{0, 0, size.x - 4, size.y - barPx(display)};
+    }
+
+    /**
+     * How much of the display's bottom the taskbar takes from a maximized window.
+     *
+     * Zero while the bar hides itself: the PC computes the same rect (scrcpy.rs
+     * maxed_rect), and the two MUST agree — this service tells a maximized
+     * window from a merely screen-filling one by comparing bounds against this
+     * rect, so a mismatch would read every maximize as One UI fullscreen and
+     * undo it. The preference is the launcher's; the PC is told separately by
+     * RequestProvider and keeps its own copy in step.
+     */
+    private int barPx(int display) {
+        int d = DexPrefs.getBool(this, DexPrefs.KEY_TASKBAR_AUTOHIDE, true) ? 0 : 1;
+        return d == 0 ? 0 : taskbarPx(display);
     }
 
     /**

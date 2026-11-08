@@ -1970,6 +1970,22 @@ public class SettingsActivity extends Activity {
             });
         }
 
+        // The bar's own behaviour, next to the window defaults it belongs
+        // with: hidden, a maximised window reaches the bottom of the screen.
+        // Not shown on the phone's dock, where there is no pointer to bring
+        // the bar back with — see LauncherActivity.taskbarAutohide().
+        if (getDisplay() == null
+                || getDisplay().getDisplayId() != android.view.Display.DEFAULT_DISPLAY) {
+            LinearLayout barCard = card(body);
+            cardHeader(barCard, s(R.string.st_taskbar));
+            toggleRow(barCard, s(R.string.st_taskbar_autohide),
+                    s(R.string.st_taskbar_autohide_sub),
+                    DexPrefs.getBool(this, DexPrefs.KEY_TASKBAR_AUTOHIDE, true), true, on -> {
+                        DexPrefs.put(this, DexPrefs.KEY_TASKBAR_AUTOHIDE, on);
+                        showSection(SEC_WINDOWS, false);
+                    });
+        }
+
         LinearLayout iconCard = card(body);
         cardHeader(iconCard, s(R.string.st_icon_size));
         String icons = DexPrefs.getString(this, DexPrefs.KEY_ICON_SIZE, DexPrefs.DEF_ICON_SIZE);
@@ -3442,7 +3458,8 @@ public class SettingsActivity extends Activity {
         // worked — every app would still open exactly where it used to.
         scopes.add(new ResetScope(R.string.st_scope_windows, DexPrefs.KEY_LAUNCH_MODE,
                 DexPrefs.KEY_WINDOW_SIZE, DexPrefs.KEY_ICON_SIZE,
-                DexPrefs.KEY_WINDOW_MEMORY, DexPrefs.KEY_WINDOW_GEOMETRY));
+                DexPrefs.KEY_WINDOW_MEMORY, DexPrefs.KEY_WINDOW_GEOMETRY,
+                DexPrefs.KEY_TASKBAR_AUTOHIDE));
         // The GRANT is not in here and cannot be: notification access is the
         // platform's to hold, not ours, and nothing in this app can give it
         // back afterwards. Only our own two switches are reset.
