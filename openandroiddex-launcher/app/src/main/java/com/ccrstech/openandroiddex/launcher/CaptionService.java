@@ -359,6 +359,15 @@ public final class CaptionService extends AccessibilityService {
     private final Set<Integer> maximized = new HashSet<>();
     /** taskId -> {l,t,r,b} to restore to, captured the first time it is maximised/snapped. */
     private final Map<Integer, int[]> restoreBounds = new HashMap<>();
+    /** The drag ghost and the layout picker. Built on first use — see SnapOverlay. */
+    private SnapOverlay snapOverlay;
+    /**
+     * The zone the window being dragged would land in, or SnapZones.NONE.
+     *
+     * Held between the move that set it and the release that acts on it, so the
+     * rect the ghost drew is exactly the rect the release applies.
+     */
+    private int dragZone = SnapZones.NONE;
     /**
      * Longest a curtain stays up without a real caption landing. After this we remove it and
      * accept the platform caption, so an app that never exposes a host (e.g. activity
@@ -553,6 +562,10 @@ public final class CaptionService extends AccessibilityService {
 
     @Override
     public void onDestroy() {
+        if (snapOverlay != null) {
+            snapOverlay.detach();
+            snapOverlay = null;
+        }
         running = false;
         live = null;
         if (unplug != null) unplug.stop();
@@ -1330,7 +1343,16 @@ public final class CaptionService extends AccessibilityService {
                 bar.addView(button(ui, "◨", false, v -> onSnapRight(task)), buttonParams(height));
             }
             bar.addView(button(ui, "—", false, v -> onMinimise(task)), buttonParams(height));
-            bar.addView(button(ui, "▢", false, v -> onMaximise(task)), buttonParams(height));
+            // ▢ takes a long press as well: the snap layouts. The click stays
+            // maximise, because that is what the button has always done and
+            // what the glyph says — the long press is the second thing it can
+            // do, not a replacement.
+            TextView maxBtn = button(ui, "▢", false, v -> onMaximise(task));
+            maxBtn.setOnLongClickListener(v -> {
+                showLayoutPicker(task, v);
+                return true;
+            });
+            bar.addView(maxBtn, buttonParams(height));
         }
         // Resize, where the hand already is: a grip in the title bar that pulls
         // the bottom-right corner. The window's own bottom-right corner is not
@@ -1756,10 +1778,17 @@ public final class CaptionService extends AccessibilityService {
                         // the task moves it — the compositor keeps them together with no
                         // lag and nothing for us to synchronise.
                         send(rawX - grabDx, rawY - grabDy);
+                        // Where this would land, shown while the pointer is near an
+                        // edge so the release holds no surprise. Decided from the
+                        // POINTER, not the window: the title bar is dragged by
+                        // whatever part of it was grabbed, so a wide window can be
+                        // flush left while the pointer is still in the middle.
+                        showZonePreview(task.displayId, rawX, rawY);
                         return true;
                     case android.view.MotionEvent.ACTION_UP:
                     case android.view.MotionEvent.ACTION_CANCEL:
                         if (dragging) {
+                            clearZonePreview();
                             send(rawX - grabDx, rawY - grabDy);   // replay the last point
                             dragging = false;
                             lastTap = 0;   // a drag is not half of a double-click
@@ -1768,7 +1797,9 @@ public final class CaptionService extends AccessibilityService {
                             // already make, and without it the only way to place two
                             // windows side by side is two trips to the title bar.
                             if (e.getActionMasked() == android.view.MotionEvent.ACTION_UP) {
-                                snapIfDraggedToEdge(task, rawX - grabDx, rawY - grabDy);
+                                dropToZone(task);
+                            } else {
+                                clearZonePreview();
                             }
                             return true;
                         }
@@ -1806,29 +1837,103 @@ public final class CaptionService extends AccessibilityService {
     }
 
     /**
-     * A window released near the left or right edge fills that half.
+     * How close to an edge a pointer has to be, in desktop px, for that edge to
+     * mean "put it there".
      *
-     * Deliberately generous about where the window's TOP-LEFT ended up rather
-     * than where the pointer is: the title bar is dragged by its own grip point,
-     * so the pointer can be a hundred pixels shy of the edge while the window is
-     * already flush against it. Only the horizontal position decides, and only
-     * for a window that is not already filling the display — a maximised window
-     * dropped at the edge should not become a half.
+     * Generous on purpose — the same order as Windows' own snap band, wide
+     * enough that a quick flick at an edge needs no pixel aim, and capped
+     * against the display in {@link SnapZones#at} so a small display keeps a
+     * reachable middle.
      */
-    private void snapIfDraggedToEdge(WmClient.Task task, int winX, int winY) {
-        final int id = task.taskId;
-        final int display = task.displayId;
+    private int snapBandPx() {
+        return px(28);
+    }
+
+    /** The lowest row a window may occupy: the display less whatever the bar takes. */
+    private int snapBottom(int display) {
         android.graphics.Point size = displaySize(display);
-        if (size.x <= 0) return;
-        int edge = px(24);
-        // Above this the window is not being "moved to an edge", it is being
-        // dropped somewhere near one.
-        if (winY < 0 || winY > size.y - barPx(display)) return;
-        boolean left = winX <= edge;
-        boolean right = winX + (task.right - task.left) >= size.x - edge;
-        if (!left && !right) return;
-        if (near(tasks.containsKey(id) ? tasks.get(id) : task, maxRect(display))) return;
-        snap(task, left);
+        return size.y - barPx(display);
+    }
+
+    /**
+     * Which zone the pointer is over right now, and the ghost drawn there.
+     *
+     * Decided from the POINTER rather than the window's top-left, which is what
+     * the old edge test used: the title bar is dragged by whatever part of it
+     * was grabbed, so a wide window can be flush against an edge while the
+     * pointer is nowhere near it — and, worse, the window's corner can reach a
+     * corner zone the user was not aiming at.
+     *
+     * Idempotent, so it can run on every move event: an unchanged zone costs
+     * nothing.
+     */
+    private void showZonePreview(int display, float x, float y) {
+        android.graphics.Point size = displaySize(display);
+        int bottom = snapBottom(display);
+        int zone = SnapZones.at(size.x, bottom, x, y, snapBandPx());
+        if (zone == dragZone) return;
+        dragZone = zone;
+        if (zone == SnapZones.NONE) {
+            if (snapOverlay != null) snapOverlay.hidePreview();
+            return;
+        }
+        int[] rect = SnapZones.rect(zone, size.x, bottom);
+        if (rect != null) overlay().preview(display, rect);
+    }
+
+    private void clearZonePreview() {
+        dragZone = SnapZones.NONE;
+        if (snapOverlay != null) snapOverlay.hidePreview();
+    }
+
+    /**
+     * The release: put the window in the zone the ghost was showing, or leave it
+     * exactly where it was dropped.
+     *
+     * Reading {@link #dragZone} rather than testing the pointer again is what
+     * makes the ghost honest — a release a pixel outside the band still lands
+     * where the user was told it would, because the ghost was drawn for that
+     * zone and the finger never left it.
+     */
+    private void dropToZone(WmClient.Task task) {
+        int zone = dragZone;
+        clearZonePreview();
+        if (zone == SnapZones.NONE) return;
+        if (zone == SnapZones.MAXIMISE) {
+            onMaximise(task);
+        } else {
+            snapTo(task, zone);
+        }
+    }
+
+    /**
+     * Long-press on ▢: the snap layouts, as a picker.
+     *
+     * ◧ and ◨ place the two halves already, but a corner quarter had no gesture
+     * of its own until drag-to-corner existed — and a drag is a poor way to
+     * arrange four windows. The picker is the explicit route, and it sits on ▢
+     * because that button's whole subject is "make this bigger".
+     */
+    private void showLayoutPicker(WmClient.Task task, View anchor) {
+        final int display = task.displayId;
+        final android.graphics.Point size = displaySize(display);
+        int[] loc = new int[2];
+        anchor.getLocationOnScreen(loc);
+        int anchorX = loc[0] + anchor.getWidth() / 2;
+        int anchorY = loc[1] + anchor.getHeight() + px(6);
+        overlay().picker(display, new int[]{size.x, size.y}, snapBottom(display),
+                anchorX, anchorY, zone -> {
+                    WmClient.Task live = tasks.get(task.taskId);
+                    WmClient.Task t = live != null ? live : task;
+                    if (zone == SnapZones.MAXIMISE) onMaximise(t);
+                    else snapTo(t, zone);
+                });
+    }
+
+    /** The overlay, built on first use. */
+    private SnapOverlay overlay() {
+        if (snapOverlay == null) snapOverlay = new SnapOverlay(this);
+        return snapOverlay;
     }
 
     /** Movement under this is a click on the bar, not the start of a drag. */
@@ -1946,36 +2051,43 @@ public final class CaptionService extends AccessibilityService {
     }
 
     private void onSnapLeft(WmClient.Task task) {
-        snap(task, true);
+        snapTo(task, SnapZones.LEFT);
     }
 
     private void onSnapRight(WmClient.Task task) {
-        snap(task, false);
+        snapTo(task, SnapZones.RIGHT);
     }
 
     /**
-     * Fill the left or right half of the display; a snapped window is not "maximised".
+     * Put a window in one of the six zones; a snapped window is not "maximised".
      *
-     * Height stops at the taskbar for the same reason maximise does — the taskbar is an
-     * overlay drawn above app windows, so the rows underneath it are pixels the window can
-     * never show. It matters twice over here: the PC enforcer adopts whatever rect a
-     * non-maximised window is observed at as that task's restore target, so a snap that
-     * runs under the taskbar teaches the PC to restore under the taskbar too.
+     * Height stops at the taskbar — or at the display's edge while the bar hides
+     * itself — for the same reason maximise does: the taskbar is an overlay
+     * drawn above app windows, so the rows underneath it are pixels the window
+     * can never show. It matters twice over here: the PC enforcer adopts
+     * whatever rect a non-maximised window is observed at as that task's
+     * restore target, so a snap that runs under the taskbar teaches the PC to
+     * restore under the taskbar too.
      */
-    private void snap(WmClient.Task task, boolean left) {
+    private void snapTo(WmClient.Task task, int zone) {
         final int display = task.displayId;
         final int id = task.taskId;
-        final int px = captionHeight(id);
+        final android.graphics.Point size = displaySize(display);
+        final int[] rect = SnapZones.rect(zone, size.x, snapBottom(display));
+        if (rect == null) return;
         rememberRestore(tasks.containsKey(id) ? tasks.get(id) : task);
         maximized.remove(id);
-        final android.graphics.Point size = displaySize(display);
-        final int half = size.x / 2;
-        final int bottom = size.y - barPx(display);
-        if (left) {
-            wm.post(() -> wm.resize(display, id, 0, 0, half, bottom, px));
-        } else {
-            wm.post(() -> wm.resize(display, id, half, 0, size.x, bottom, px));
+        final int strip = captionHeight(id);
+        trace("snap task " + id + " -> " + SnapZones.name(zone) + " "
+                + rect[0] + "," + rect[1] + "," + rect[2] + "," + rect[3]);
+        WmClient.Task live = tasks.get(id);
+        if (live != null) {
+            live.left = rect[0];
+            live.top = rect[1];
+            live.right = rect[2];
+            live.bottom = rect[3];
         }
+        wm.post(() -> wm.resize(display, id, rect[0], rect[1], rect[2], rect[3], strip));
     }
 
     /** Capture the window's current rect as its restore target, once, until it is restored. */

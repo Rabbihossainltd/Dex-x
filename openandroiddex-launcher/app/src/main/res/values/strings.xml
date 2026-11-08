@@ -177,6 +177,9 @@
     <string name="st_taskbar">Taskbar</string>
     <string name="st_taskbar_autohide">Hide the taskbar when not in use</string>
     <string name="st_taskbar_autohide_sub">It slides away and comes back when the pointer reaches the bottom of the screen — a maximized window then fills it</string>
+    <string name="lx_snap_title">Snap this window to</string>
+    <string name="lx_snap_left">Left half</string>
+    <string name="lx_snap_right">Right half</string>
     <string name="lx_taskbar_autohide">Taskbar auto-hide</string>
     <string name="lx_taskbar_autohide_on">Auto-hide: on</string>
     <string name="lx_taskbar_autohide_off">Auto-hide: off</string>
