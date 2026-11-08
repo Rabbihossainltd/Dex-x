@@ -61,14 +61,16 @@ jobs:
         # unsigned APK that `adb install` refuses. The debug key is committed at
         # app/debug.keystore so every build is an installable upgrade of every
         # other one.
-        run: ./gradlew --no-daemon assembleDebug
+        # `bash` and not `./gradlew`: the executable bit on a checkout is not
+        # something to bet a release on.
+        run: bash ./gradlew --no-daemon assembleDebug
 
       - name: Build the wmd daemon dex
         # Not a Gradle project: javac + d8 straight to one dex, run by
         # app_process at uid 2000. Without it there is no window chrome at all —
         # the phone falls back to One UI's own caption.
         working-directory: openandroiddex-wmd
-        run: ./build.sh
+        run: bash ./build.sh
 
       - name: Build scrcpy's server, with our patches
         run: |
