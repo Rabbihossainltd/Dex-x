@@ -332,9 +332,11 @@
              joins the desktop's task and drags the shell into whatever bounds
              the caller had.
 
-             exported, because a launcher entry has to be. It is safe to be:
-             everything it can do is what the icon does — clear the uninstall
-             marker and open the window. LinuxActivity itself stays unexported. -->
+             No app-list entry any more: the only thing that starts it is the
+             desktop (LinuxService and the Remote window), which names the
+             class, so a MAIN/LAUNCHER filter would only put a second icon on
+             the phone for a feature that lives on the desktop display.
+             LinuxActivity itself stays unexported. -->
         <activity
             android:name=".LinuxAppActivity"
             android:exported="true"
@@ -346,12 +348,7 @@
             android:excludeFromRecents="true"
             android:autoRemoveFromRecents="true"
             android:resizeableActivity="true"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboard|keyboardHidden|navigation|uiMode|locale|layoutDirection|fontScale">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboard|keyboardHidden|navigation|uiMode|locale|layoutDirection|fontScale" />
 
         <!-- The Remote access window: whether computers can reach Linux, which
              ones may, and the code that lets a new one in. Same task rules as
