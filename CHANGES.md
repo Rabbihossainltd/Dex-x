@@ -58,6 +58,23 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.6.0 — straight to the desktop, and a Dex-X tile in the panel
+
+| # | Asked for | What it took |
+| --- | --- | --- |
+| 1 | **No middle screen**: plug the phone in and the desktop comes up, not a "ready — Open desktop" card first | Auto-launch was armed once, at startup, and disarmed by every launch — so the second plug-in of a run always stopped at the card. It is now armed by the phone APPEARING (`lastReadySerials`): a phone that was not usable a poll ago and is now opens its desktop by itself, including one attached when the app starts. A phone that stays attached after a session ends is not an arrival, so Disconnect still means disconnected. |
+| 2 | **Dex-X in the notification panel**: turn it on from there, see its status | A quick-settings tile (`DexTileService`). It reads the computer's beacon — the same one the app screen reads — so its subtitle is a live "Desktop running / Tap to start" rather than a memory of the last session, and it repaints while the shade is open. Tapping it when nothing is running queues a `start` request; a computer that is open with this phone attached opens the desktop on its own (new `adb_requests` / `adb_ack_requests` commands, polled on the device tick — with no session there was no pump to read the phone's queue). |
+| 3 | More bugs found and fixed | below |
+
+### Bugs
+
+* **The reconcile loop ran at 60 ms forever on a window with no host.** A task wearing the display-drawn fallback bar (v0.5.1) has no `Caption` record, so `syncCaption` answered false for it on every pass, and false is what the caller reads as "still waiting" — a phone kept warm for the rest of the session for nothing. A fallback bar now counts as dressed.
+* **The fallback bar did not follow its window.** It lives on the display, not inside the window, so the loop is the only thing that moves it — and the task was added to the "do not touch again" set the moment the bar was created. Dragging the window left the bar behind, with its buttons acting on a rect that had moved out from under them. The bar is now re-placed on every pass.
+* **Requests died with the process that raised them.** The launcher's queue was an in-memory `ArrayDeque`; the quick-settings tile is a screen that exists for one tap, and a tap milliseconds before Android reclaims the app was a request the computer never saw. The queue is written to prefs on every enqueue and pruned on every ack (capped at 32 rows), so a request outlives the process and the id counter comes back ahead of it.
+* **Open apps vanished from the taskbar when they had no launcher activity.** The open-apps row resolved each package through the drawer's list, which is built from `ACTION_MAIN`/`CATEGORY_LAUNCHER` — so a camera opened from the lock screen, an app opened from a notification, or a settings sub-screen was named, found in no list, and skipped. Those packages are now resolved through the PackageManager, and their tile RAISES the window it already has (`CaptionService.focusPackage`) instead of trying to start something that does not exist.
+
+---
+
 ## Next, in order
 
 1. **Taskbar auto-hide with hover reveal** — what the reporter of the taskbar

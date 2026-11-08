@@ -74,6 +74,8 @@ pub fn run() {
             adb::adb_reboot,
             adb::adb_connect,
             adb::adb_start_launcher,
+            adb::adb_requests,
+            adb::adb_ack_requests,
             // The way back out of a fullscreen window on a phone that cannot
             // draw a titlebar to close it with.
             wm::desktop_home,

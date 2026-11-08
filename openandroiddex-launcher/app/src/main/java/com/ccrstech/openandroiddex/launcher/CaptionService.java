@@ -133,6 +133,32 @@ public final class CaptionService extends AccessibilityService {
      * for the captions, so it is the authoritative answer to "is it still
      * open", and it is in-process — no broadcast, no race.
      */
+    /**
+     * Bring an app's window to the front by package.
+     *
+     * The taskbar's way back to a window is normally the app's own launcher
+     * activity, which is also how the drawer opens it. An app with NO launcher
+     * activity — one started from a notification, a widget, another app — has no
+     * activity to start, and the taskbar tile for it used to be a click that did
+     * nothing. This is the other half: the window is already on the display, so
+     * all it needs is to be raised.
+     *
+     * @return false when no live task of that package is known — the caller falls
+     *         back to whatever it would have done.
+     */
+    static boolean focusPackage(String pkg) {
+        CaptionService s = live;
+        if (s == null || s.wm == null || pkg == null) return false;
+        for (WmClient.Task t : s.tasks.values()) {
+            if (!pkg.equals(t.pkg)) continue;
+            final int display = t.displayId;
+            final int id = t.taskId;
+            s.wm.post(() -> s.wm.front(display, id));
+            return true;
+        }
+        return false;
+    }
+
     static java.util.Set<String> openPkgs() {
         CaptionService s = live;
         if (s == null) return java.util.Collections.emptySet();
@@ -892,7 +918,13 @@ public final class CaptionService extends AccessibilityService {
             }
             // Title and size first, and without needing the host — a window resized on a
             // pass where the host is missing must still get a correctly sized bar.
-            boolean ok = syncCaption(t);
+            //
+            // A task wearing the display-level fallback bar counts as dressed: it has
+            // no Caption record, so syncCaption answers false for it forever, and the
+            // caller reads false as "still waiting" — which held the reconcile loop at
+            // its 60 ms busy cadence for the rest of the session on a desktop where one
+            // window had no host. That is a phone kept warm for nothing.
+            boolean ok = syncCaption(t) || floating.get(t.taskId) != null;
             if (host == null) {
                 // The host window is not in the accessibility list this pass. On One UI
                 // that is the platform's caption blinking out; do NOT fall back to the app
@@ -928,20 +960,30 @@ public final class CaptionService extends AccessibilityService {
                                 + describe(windows));
                     }
                 }
-                if (captions.get(t.taskId) == null && !noCurtain.contains(t.taskId)) {
-                    Long since = curtainSince.get(t.taskId);
-                    if (since != null
-                            && SystemClock.uptimeMillis() - since > CURTAIN_MAX_MS) {
-                        // Not "give up": give the user our buttons anyway. The
-                        // curtain has been up for 1.5s and nothing has come to
-                        // host on, which on a Samsung desktop means the window
-                        // is sitting there wearing One UI's own ▢ ✕ with no
-                        // minimise. Draw the real bar on the display instead.
-                        hideCurtain(t.taskId);
-                        noCurtain.add(t.taskId);
+                if (captions.get(t.taskId) == null) {
+                    if (noCurtain.contains(t.taskId)) {
+                        // Already given up on finding a host: the bar lives on the
+                        // DISPLAY, not in the window, so nothing moves it but this
+                        // loop. Skipping the call for a task in noCurtain — which is
+                        // what the guard here used to do — left the bar behind the
+                        // moment the window was dragged, with the buttons still
+                        // acting on a rect that had moved out from under them.
                         showFloatingBar(t);
                     } else {
-                        showCurtain(t);
+                        Long since = curtainSince.get(t.taskId);
+                        if (since != null
+                                && SystemClock.uptimeMillis() - since > CURTAIN_MAX_MS) {
+                            // Not "give up": give the user our buttons anyway. The
+                            // curtain has been up for 1.5s and nothing has come to
+                            // host on, which on a Samsung desktop means the window
+                            // is sitting there wearing One UI's own ▢ ✕ with no
+                            // minimise. Draw the real bar on the display instead.
+                            hideCurtain(t.taskId);
+                            noCurtain.add(t.taskId);
+                            showFloatingBar(t);
+                        } else {
+                            showCurtain(t);
+                        }
                     }
                 }
                 if (!ok) missing++;

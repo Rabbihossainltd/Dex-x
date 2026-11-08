@@ -2,6 +2,7 @@ package com.ccrstech.openandroiddex.launcher;
 
 import android.content.ContentProvider;
 import android.content.ContentValues;
+import android.content.Context;
 import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
@@ -29,14 +30,46 @@ public class RequestProvider extends ContentProvider {
     /** Seeded from wall time: still increases across launcher restarts. */
     private static long nextId = System.currentTimeMillis();
 
+    /** Application context, for the persisted queue. Set by the first provider call. */
+    private static Context APP;
+
+    /**
+     * Hand the provider a context from a screen that runs before any provider
+     * call does.
+     *
+     * The quick-settings tile is exactly that: it can be tapped on a phone that
+     * has not run the app since boot, and a request raised then has to be written
+     * down before the process is allowed to die again — otherwise the tap is a
+     * row in a heap that no longer exists by the time the computer asks.
+     */
+    static void attach(Context ctx) {
+        if (ctx != null && APP == null) APP = ctx.getApplicationContext();
+    }
+
     /** The fast channel. Created on first use; one socket for the process. */
     private static WmClient wm;
+
+    /**
+     * How many undrained requests are worth keeping.
+     *
+     * The queue is normally drained within a poll, so this only ever fills up on
+     * a phone whose computer is not running — where the alternative to a cap is a
+     * prefs file that grows for the life of the install. Old rows are dropped from
+     * the FRONT: the newest intent is the one the user still means.
+     */
+    private static final int MAX_QUEUE = 32;
+
+    /** Where the queue survives a process death. See {@link #load}. */
+    private static final String PREFS = "dex_requests";
+    private static final String KEY_QUEUE = "queue";
 
     public static void enqueue(String cmd, String arg) {
         final long id;
         synchronized (QUEUE) {
             id = ++nextId;
             QUEUE.add(new String[]{String.valueOf(id), cmd, arg});
+            while (QUEUE.size() > MAX_QUEUE) QUEUE.poll();
+            save();
             // The PC logs what it executes; this is the other end of that
             // pair, so a request that is raised but never drained (a dead
             // pump, a wedged adb shell) shows up as a gap rather than as
@@ -74,7 +107,53 @@ public class RequestProvider extends ContentProvider {
 
     @Override
     public boolean onCreate() {
+        APP = getContext() == null ? null : getContext().getApplicationContext();
+        load();
         return true;
+    }
+
+    /**
+     * Rebuild the queue from prefs, and keep the id counter ahead of it.
+     *
+     * A request raised from a screen that then goes away — the quick-settings
+     * tile is exactly that — used to live only in this process's heap. Android
+     * is free to kill the app between the tap and the computer's next poll, and
+     * a killed app is a tap that silently did nothing; the id counter has to
+     * come back with the rows or the computer's watermark would skip them for
+     * being older than what it has already run.
+     */
+    private void load() {
+        if (getContext() == null) return;
+        String raw = getContext()
+                .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(KEY_QUEUE, "");
+        if (raw == null || raw.isEmpty()) return;
+        synchronized (QUEUE) {
+            if (!QUEUE.isEmpty()) return;      // already built by enqueue
+            for (String line : raw.split("\n")) {
+                String[] parts = line.split("\t", 3);
+                if (parts.length != 3) continue;
+                try {
+                    nextId = Math.max(nextId, Long.parseLong(parts[0]));
+                } catch (NumberFormatException e) {
+                    continue;
+                }
+                QUEUE.add(parts);
+            }
+        }
+    }
+
+    /** Write the queue out. Called with the lock held, from enqueue and delete. */
+    private static void save() {
+        Context ctx = APP;
+        if (ctx == null) return;
+        StringBuilder sb = new StringBuilder();
+        for (String[] row : QUEUE) {
+            if (sb.length() > 0) sb.append('\n');
+            sb.append(row[0]).append('\t').append(row[1]).append('\t').append(row[2]);
+        }
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putString(KEY_QUEUE, sb.toString()).apply();
     }
 
     @Override
@@ -131,6 +210,9 @@ public class RequestProvider extends ContentProvider {
                 } catch (NumberFormatException ignored) {
                 }
             }
+            // Persisted rows are the queue, so an ack has to reach them or the
+            // next process would resurrect requests this one has already run.
+            if (removed > 0) save();
         }
         return removed;
     }

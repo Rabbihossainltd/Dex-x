@@ -220,6 +220,11 @@ public class ConnectActivity extends android.app.Activity {
     private void render() {
         if (status == null) return;
         boolean connected = HostLink.available();
+        // The quick-settings tile reads the same beacon, so it goes stale at the
+        // same moment this card does. Ask the system to re-read it on the CHANGE
+        // only: a request per tick would be a binder call every 1.2 s for as long
+        // as this screen is open, to say nothing new.
+        if (connected != shownConnected) DexTileService.refresh(this);
         shownConnected = connected;
         GradientDrawable d = new GradientDrawable();
         d.setShape(GradientDrawable.OVAL);

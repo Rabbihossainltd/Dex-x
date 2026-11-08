@@ -787,6 +787,10 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     private final BroadcastReceiver runningReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context ctx, Intent intent) {
+            // The computer's beacon is also the quick-settings tile's status, and
+            // this receiver is where a session's first word lands. Cheap on a
+            // repeat: the system reads the component and finds nothing to do.
+            DexTileService.refresh(LauncherActivity.this);
             pcSeenAt = SystemClock.uptimeMillis();
             // The first word from a computer is what says the phone's screen is free to
             // be its touchpad. A field compare on every later beat.
@@ -6505,6 +6509,37 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     }
 
     // ── Open-apps row (center of the taskbar) ──
+    /**
+     * An OPEN package the drawer has no entry for.
+     *
+     * {@link #loadApps} builds the drawer from apps that have a launcher
+     * activity, which is the right list for a launcher and the wrong one for a
+     * taskbar: an app can be open on this display without ever being startable
+     * (a camera opened from the lock screen, a settings sub-screen, an app that
+     * only answers an intent). Those windows lost their tile the moment the row
+     * was rebuilt — the "open apps do not stay on the taskbar" report — because
+     * the loop above skipped a package it could not name.
+     *
+     * The entry is deliberately NOT added to `allApps`: it is not in the drawer,
+     * and the drawer is the list of things the user can start. An empty class
+     * name in the component is the flag the click handler reads (see
+     * refreshOpenApps) to raise the window instead of starting it.
+     */
+    private AppEntry resolveOpenPackage(String pkg) {
+        if (pkg == null || pkg.isEmpty() || LINUX_PKG.equals(pkg)) return null;
+        try {
+            PackageManager pm = getPackageManager();
+            android.content.pm.ApplicationInfo info = pm.getApplicationInfo(pkg, 0);
+            Intent launch = pm.getLaunchIntentForPackage(pkg);
+            ComponentName component = launch != null && launch.getComponent() != null
+                    ? launch.getComponent()
+                    : new ComponentName(pkg, "");
+            return new AppEntry(info.loadLabel(pm), info.loadIcon(pm), component);
+        } catch (Exception e) {
+            return null;   // uninstalled since it was opened
+        }
+    }
+
     AppEntry findByPackage(String pkg) {
         for (AppEntry a : allApps) {
             if (a.component.getPackageName().equals(pkg)) return a;
@@ -6559,6 +6594,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         addOwnWindowTiles();
         for (String pkg : runningPkgs) {
             AppEntry entry = findByPackage(pkg);
+            if (entry == null) entry = resolveOpenPackage(pkg);
             if (entry == null) continue;
             final AppEntry app = entry;
 
@@ -6567,7 +6603,20 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
             icon.setContentDescription(app.label);
             LinearLayout item = taskbarTile(icon);
 
-            item.setOnClickListener(v -> launch(app)); // relaunch = refocus
+            item.setOnClickListener(v -> {
+                // An app the drawer does not list (no launcher activity — started
+                // from a notification, a widget or another app) has nothing to
+                // launch. Its window is already on the display, so the click is a
+                // raise, not a start — the alternative was a tile that did nothing
+                // and a window with no way back from the taskbar.
+                if (app.component.getClassName().isEmpty()) {
+                    if (CaptionService.focusPackage(pkg)) return;
+                    Toast.makeText(this, getString(R.string.wb_not_running, app.label),
+                            Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                launch(app); // relaunch = refocus
+            });
             // right-click (forwarded by scrcpy) or long-press → app menu
             item.setOnContextClickListener(v -> {
                 showTaskbarAppMenu(v, app);

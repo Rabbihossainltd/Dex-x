@@ -2114,6 +2114,50 @@ fn watch_for_install_prompt(app: &tauri::AppHandle, serial: &str, done: Arc<Atom
     });
 }
 
+/// The launcher's pending requests, read without a desktop running.
+///
+/// Every other reader of this queue lives inside a session (`scrcpy`'s request
+/// pump, over the session's own adb shell). That leaves one state with no
+/// channel at all: the computer is running, the phone is attached, and no
+/// desktop has been opened — which is exactly the state the phone's
+/// quick-settings tile taps into. Its `start` row would otherwise sit in the
+/// launcher's queue until the next session, which is a switch that does
+/// nothing.
+///
+/// Returns the raw `content query` output: the rows are parsed by the same
+/// `parse_request_row` the session pump uses, so the two cannot disagree about
+/// what a request is.
+#[tauri::command(async)]
+pub fn adb_requests(app: tauri::AppHandle, serial: String) -> Result<String, String> {
+    run_adb_quiet(
+        &app,
+        &[
+            "-s",
+            &serial,
+            "shell",
+            "content query --uri content://com.ccrstech.openandroiddex.launcher.requests/v2",
+        ],
+    )
+}
+
+/// Ack rows up to `id`: the queue is only drained once a request has actually
+/// been acted on, so a computer that dies mid-poll leaves the request queued
+/// for the next one instead of eating it.
+#[tauri::command(async)]
+pub fn adb_ack_requests(app: tauri::AppHandle, serial: String, id: u64) -> Result<String, String> {
+    run_adb_quiet(
+        &app,
+        &[
+            "-s",
+            &serial,
+            "shell",
+            &format!(
+                "content delete --uri content://com.ccrstech.openandroiddex.launcher.requests/v2 --where \"id<={id}\""
+            ),
+        ],
+    )
+}
+
 /// Install (or update) the bundled Open Android DeX launcher APK and start
 /// it on the given display.
 ///

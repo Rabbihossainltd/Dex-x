@@ -127,6 +127,22 @@ export default function App() {
   const armedRef = useRef(true);
   const scannedOnce = useRef(false);
   /**
+   * The phones the previous poll could use.
+   *
+   * Auto-launch is on the EDGE, not on the presence: a phone that appears — plugged
+   * in, back on Wi-Fi, woken up — opens its desktop without anyone pressing
+   * anything, which is the whole promise of the cable. A phone that stays attached
+   * after a session ended is NOT a new arrival, and re-launching it would turn
+   * "Disconnect" into a button that does nothing.
+   */
+  const lastReadySerials = useRef<Set<string>>(new Set());
+  /**
+   * The last request row acted on with no session running (the phone's
+   * quick-settings tile). Ids come from the launcher and only ever grow, so a
+   * row seen twice costs nothing.
+   */
+  const idleReqId = useRef(0);
+  /**
    * The serial to launch on when more than one is ready. A phone that has just
    * been put on Wi-Fi is still on the cable too, and launching on the USB
    * serial would tie the session to the cable the user is about to pull out.
@@ -246,6 +262,16 @@ export default function App() {
         const list = await invoke<DeviceInfo[]>("adb_list_devices");
         if (!cancelled) {
           scannedOnce.current = true;
+          // A phone that was not usable a moment ago and is now: that is a plug-in,
+          // and it arms the auto-launch however the last session ended. The very
+          // first poll counts too — a phone that was already attached when the app
+          // started has never been seen, and it should not wait for a button.
+          const ready = new Set(list.filter((d) => d.state === "device").map((d) => d.serial));
+          const appeared = [...ready].some((serial) => !lastReadySerials.current.has(serial));
+          lastReadySerials.current = ready;
+          if (appeared && (phaseRef.current.kind === "boot" || phaseRef.current.kind === "connect" || phaseRef.current.kind === "ended")) {
+            armedRef.current = true;
+          }
           setDevices(list);
         }
       } catch {
@@ -370,7 +396,12 @@ export default function App() {
   useEffect(() => {
     if (!startupChecked) return;
     const current = phaseRef.current;
-    if (current.kind !== "boot" && current.kind !== "connect") return;
+    // "ended" is here for the same reason "connect" is: a phone unplugged from a
+    // finished session and plugged back in is a NEW arrival (see lastReadySerials),
+    // and the whole promise of the cable is that the desktop comes with it. The
+    // re-arm only ever happens on that edge, so a Disconnect that left the phone
+    // attached stays disconnected.
+    if (current.kind !== "boot" && current.kind !== "connect" && current.kind !== "ended") return;
     // A phone just moved onto Wi-Fi is briefly present twice, once per
     // transport. Prefer the one that was asked for.
     const ready =
@@ -382,6 +413,72 @@ export default function App() {
       setPhase({ kind: "connect" });
     }
   }, [devices, launch, reconnectDone, startupChecked]);
+
+  // ── "Start" from the phone's quick-settings tile, with no desktop running ──
+  // The session's own request pump reads the launcher's queue over its adb shell;
+  // with no session there is no pump, and the state the tile exists for is exactly
+  // that one. So the queue is read here, on the device poll's cadence, and only
+  // while nothing is running — a session's pump is the authority the moment there
+  // is one, and two readers would race on the acks.
+  const idleSerial =
+    (devices.find((d) => d.state === "device" && d.serial === preferredSerial.current) ??
+      devices.find((d) => d.state === "device"))?.serial ?? null;
+  const idle = phase.kind !== "launching" && phase.kind !== "ready" && idleSerial;
+  useEffect(() => {
+    if (!idle) return;
+    const serial = idle;
+    let stopped = false;
+    let inFlight = false;
+    const poll = async () => {
+      if (inFlight || stopped) return;
+      inFlight = true;
+      try {
+        const rows = await invoke<string>("adb_requests", { serial });
+        let ack = 0;
+        for (const line of rows.split("\n")) {
+          const idm = /id=(\d+)/.exec(line);
+          const cmdm = /cmd=([A-Za-z0-9_.-]+)/.exec(line);
+          if (!idm) continue;
+          const id = Number(idm[1]);
+          const cmd = cmdm?.[1] ?? "";
+          if (!Number.isFinite(id)) continue;
+          // Only rows this pump understands are acked. A "close" or a "qs" row
+          // raised from the phone belongs to the session's own pump, which is the
+          // one that can run it; consuming it here would be a request that
+          // vanished between two readers.
+          if (cmd !== "start") continue;
+          if (id <= idleReqId.current) continue;
+          idleReqId.current = id;
+          ack = Math.max(ack, id);
+          const now = phaseRef.current;
+          if (now.kind === "boot" || now.kind === "connect" || now.kind === "ended") {
+            logInfo("tile: the phone asked for the desktop — opening it");
+            armedRef.current = true;
+            const device = devices.find((d) => d.serial === serial);
+            if (device && device.state === "device") launch(device);
+          }
+        }
+        if (ack > 0) {
+          invoke("adb_ack_requests", { serial, id: ack }).catch((e) =>
+            logWarn(`tile: could not ack requests up to ${ack} — ${String(e)}`),
+          );
+        }
+      } catch {
+        // adb busy, phone asleep, app not installed: next tick asks again
+      } finally {
+        inFlight = false;
+      }
+    };
+    poll();
+    const timer = setInterval(poll, 2500);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+    // `devices` deliberately left out: it is a fresh array every 2.5 s and would
+    // rebuild this timer on every tick for no change of answer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idle, idleSerial, launch]);
 
   // ── A phone on the cable that needs something done ──
   // Plugging one in is choosing the cable: the connect screen turns to it, so

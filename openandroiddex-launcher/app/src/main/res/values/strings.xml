@@ -185,6 +185,16 @@
     <string name="cx_not_connected_sub">Open Dex-X on your computer, then plug this phone in with a USB cable — or put both on the same Wi‑Fi and connect from the computer. Nothing else is needed here.</string>
     <string name="cx_disconnect">Disconnect</string>
     <string name="cx_disconnecting">Disconnecting…</string>
+    <!-- Quick settings tile: the switch that puts the desktop up without touching
+         the computer, and the phone's only status readout outside the app. -->
+    <string name="tile_connected">Desktop running</string>
+    <string name="tile_not_connected">Tap to start</string>
+    <string name="tile_state_connected">Dex-X is connected to your computer</string>
+    <string name="tile_state_not_connected">Dex-X is not connected. Tap to ask your computer to open the desktop.</string>
+    <string name="tile_asking">Asking your computer to open the desktop…</string>
+    <!-- The taskbar's tile for an app with no launcher activity: the click raises
+         the window it already has, and this is what it says if the window is gone. -->
+    <string name="wb_not_running">%1$s is not running any more</string>
     <string name="lx_snap_title">Snap this window to</string>
     <string name="lx_snap_left">Left half</string>
     <string name="lx_snap_right">Right half</string>
