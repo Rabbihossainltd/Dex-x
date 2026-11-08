@@ -1,0 +1,228 @@
+name: Dex-X — APK + Windows EXE
+
+# Everything the user downloads, built from whatever is on main.
+#
+# Two products, one run:
+#   * Dex-X-launcher.apk  — the phone half. Sideload it and the launcher IS the
+#     desktop (on the phone's screen, on a monitor, or inside Samsung DeX).
+#     Signed with the committed debug key, so it installs OVER the previous
+#     build instead of fighting its signature.
+#   * Dex-X-windows.zip   — the PC half: the portable exe and its resources,
+#     with the launcher APK and the wmd daemon already inside it.
+#
+# No release, no tag, no version bump: a push builds, and the files sit on the
+# run's page as artifacts. That is deliberate — a version bump on every push
+# makes the version number meaningless, and this repository is one person's
+# build rather than a release channel.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: dex-x-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Must match openandroiddex-scrcpy/build.mjs and
+  # resources/THIRD_PARTY_LICENSES.md — the verify step below enforces the
+  # licence, and the build script enforces its own copy of this number.
+  SCRCPY_VERSION: "5.0.1"
+  SCRCPY_SHA256_WIN64: "b12a2c4ee8be317422451fc7dcf8ee20a71b5ea7ef9ad73ddd825a25316227a5"
+
+jobs:
+  # ── the phone side, and the payloads the PC build needs ───────────────────
+  payloads:
+    name: Launcher APK + payloads
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # android-35 for the launcher APK, android-36 for the wmd dex (its
+          # sources compile against the android-36 platform jar).
+          packages: "platforms;android-35 platforms;android-36 build-tools;35.0.0"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build the launcher APK
+        working-directory: openandroiddex-launcher
+        # Debug, not release: assembleRelease has no signingConfig and emits an
+        # unsigned APK that `adb install` refuses. The debug key is committed at
+        # app/debug.keystore so every build is an installable upgrade of every
+        # other one.
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Build the wmd daemon dex
+        # Not a Gradle project: javac + d8 straight to one dex, run by
+        # app_process at uid 2000. Without it there is no window chrome at all —
+        # the phone falls back to One UI's own caption.
+        working-directory: openandroiddex-wmd
+        run: ./build.sh
+
+      - name: Build scrcpy's server, with our patches
+        run: |
+          grep -qF "SCRCPY_VERSION = '$SCRCPY_VERSION'" openandroiddex-scrcpy/build.mjs || {
+            echo "::error::openandroiddex-scrcpy/build.mjs does not build scrcpy $SCRCPY_VERSION"
+            exit 1
+          }
+          node openandroiddex-scrcpy/build.mjs
+
+      - name: Stage payloads under their shipped names
+        run: |
+          mkdir -p payloads standalone
+          cp openandroiddex-launcher/app/build/outputs/apk/debug/app-debug.apk \
+             payloads/openandroiddex-launcher.apk
+          cp openandroiddex-wmd/openandroiddex-wmd.dex payloads/openandroiddex-wmd.dex
+          cp openandroiddex-scrcpy/build/scrcpy-server payloads/scrcpy-server
+          # The download the user actually installs on the phone.
+          cp openandroiddex-launcher/app/build/outputs/apk/debug/app-debug.apk \
+             standalone/Dex-X-launcher.apk
+          ls -l payloads standalone
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phone-payloads
+          path: payloads/*
+          if-no-files-found: error
+          retention-days: 1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Dex-X-launcher-apk
+          path: standalone/Dex-X-launcher.apk
+          if-no-files-found: error
+          retention-days: 30
+
+  # ── the PC side ───────────────────────────────────────────────────────────
+  windows:
+    name: Windows exe
+    needs: payloads
+    runs-on: windows-latest
+    env:
+      # tauri.conf.json's beforeBuildCommand rebuilds the APK and the dex from
+      # source. This runner has no JDK and no Android SDK; both were built by
+      # the job above and are downloaded below. The verify step makes sure
+      # neither can silently go missing.
+      SKIP_LAUNCHER_APK: "1"
+      SKIP_WMD_DEX: "1"
+      SKIP_SCRCPY_SERVER: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: open-android-dex-tauri/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: open-android-dex-tauri/src-tauri
+
+      - name: Install frontend dependencies
+        working-directory: open-android-dex-tauri
+        run: npm ci
+
+      # resources/bin is gitignored, so it does not exist on a fresh checkout —
+      # and the bundle declares it as a resource, which fails the build if it is
+      # missing. Populate it before Tauri runs.
+      - name: Fetch scrcpy + adb
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ver = $env:SCRCPY_VERSION
+          $bin = "open-android-dex-tauri/src-tauri/resources/bin"
+          $zip = Join-Path $env:RUNNER_TEMP "scrcpy-win64-v$ver.zip"
+          $out = Join-Path $env:RUNNER_TEMP "scrcpy"
+          New-Item -ItemType Directory -Path $bin -Force | Out-Null
+          $url = "https://github.com/Genymobile/scrcpy/releases/download/v$ver/scrcpy-win64-v$ver.zip"
+          Write-Host "Downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          $actual = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $env:SCRCPY_SHA256_WIN64.ToLower()) {
+            throw "scrcpy checksum mismatch`n  expected $($env:SCRCPY_SHA256_WIN64)`n  actual   $actual"
+          }
+          Expand-Archive -Path $zip -DestinationPath $out -Force
+          Copy-Item (Join-Path (Join-Path $out "scrcpy-win64-v$ver") '*') $bin -Recurse -Force
+          foreach ($shim in @('open_a_terminal_here.bat', 'scrcpy-console.bat', 'scrcpy-noconsole.vbs')) {
+            $p = Join-Path $bin $shim
+            if (Test-Path $p) { Remove-Item -LiteralPath $p -Force }
+          }
+
+      - name: Download phone payloads
+        uses: actions/download-artifact@v4
+        with:
+          name: phone-payloads
+          path: open-android-dex-tauri/src-tauri/resources/bin
+
+      - name: Verify bundled binaries
+        shell: pwsh
+        run: |
+          $bin = "open-android-dex-tauri/src-tauri/resources/bin"
+          $required = @(
+            'adb.exe', 'AdbWinApi.dll', 'AdbWinUsbApi.dll',
+            'scrcpy.exe', 'scrcpy-server', 'SDL3.dll',
+            'avcodec-63.dll', 'avformat-63.dll', 'avutil-61.dll',
+            'swresample-7.dll', 'libusb-1.0.dll',
+            'scrcpy.png', 'disconnected.png',
+            'openandroiddex-launcher.apk', 'openandroiddex-wmd.dex'
+          )
+          $missing = $required | Where-Object { -not (Test-Path (Join-Path $bin $_)) }
+          if ($missing) { throw "missing from ${bin}: $($missing -join ', ')" }
+          $lic = "open-android-dex-tauri/src-tauri/resources/THIRD_PARTY_LICENSES.md"
+          if (-not (Select-String -Path $lic -Pattern "scrcpy $env:SCRCPY_VERSION" -SimpleMatch -Quiet)) {
+            throw "THIRD_PARTY_LICENSES.md does not mention scrcpy $env:SCRCPY_VERSION"
+          }
+          Get-ChildItem $bin | Select-Object Name, Length | Format-Table -AutoSize
+
+      - name: Build the app
+        working-directory: open-android-dex-tauri
+        env:
+          # Static MSVC runtime, so the exe runs on a machine with no VC++ redist.
+          RUSTFLAGS: "-C target-feature=+crt-static"
+        run: npx tauri build
+
+      - name: Stage the exe, the installer and a portable zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $rel = "open-android-dex-tauri/src-tauri/target/release"
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          New-Item -ItemType Directory -Path portable -Force | Out-Null
+
+          Copy-Item "$rel/open-android-dex-tauri.exe" portable/
+          if (Test-Path "$rel/resources") { Copy-Item "$rel/resources" portable/resources -Recurse }
+
+          # The user's two downloads: a zip that runs from anywhere, and the
+          # NSIS installer for a Start-menu entry.
+          Compress-Archive -Path portable/* -DestinationPath "dist/Dex-X-windows-x64-portable.zip"
+          $setup = @(Get-ChildItem "$rel/bundle/nsis/*.exe")
+          if ($setup.Count -eq 1) {
+            Copy-Item $setup[0].FullName "dist/Dex-X-windows-x64-setup.exe"
+          } else {
+            Write-Host "::warning::expected one NSIS installer, found $($setup.Count)"
+          }
+          Get-ChildItem dist | Select-Object Name, Length | Format-Table -AutoSize
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Dex-X-windows
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30

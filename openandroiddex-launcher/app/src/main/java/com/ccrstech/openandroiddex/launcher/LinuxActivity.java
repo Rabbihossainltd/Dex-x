@@ -1,0 +1,1796 @@
+package com.ccrstech.openandroiddex.launcher;
+
+import android.app.Activity;
+import android.app.Dialog;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.res.ColorStateList;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
+import android.graphics.drawable.StateListDrawable;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
+import android.util.TypedValue;
+import android.view.Gravity;
+import android.view.KeyEvent;
+import android.view.ViewGroup;
+import android.webkit.WebResourceError;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.TextView;
+
+/**
+ * The desktop's Linux window: Ubuntu under proot, XFCE through TigerVNC's
+ * Xvnc, rendered by the noVNC page a loopback websockify serves — this
+ * activity is only the viewer plus the install narration in front of it.
+ *
+ * The app owns the container: {@link LinuxService} downloads the rootfs, runs
+ * the install, and hosts the runtime, all under this app's own uid. This
+ * window drives it purely through the service and by reading {@link Linux}'s
+ * on-disk state — no daemon, no PC. It shows whichever of five screens the
+ * state calls for: the app chooser (once, before anything is downloaded),
+ * installing (with real progress), starting, the live WebView, or an error
+ * with a Retry.
+ *
+ * Closing the window shuts the container down — the caption's ✕ is routed here
+ * as {@link LauncherActivity#ACTION_CLOSE_WINDOW} rather than removing the
+ * task, precisely so the question can be asked first. A MINIMISED window
+ * (onStop only) keeps everything running, so reopening is instant; that is the
+ * way to put the session aside without ending it. The installed distro lives
+ * in private storage and survives either way.
+ *
+ * The UI is built in code for the same reason the rest of the launcher is:
+ * it must be created at whatever density `wm density` last put on this
+ * display, and an inflated layout brings the phone's density with it.
+ */
+public class LinuxActivity extends Activity {
+
+    /** Status-poll cadence. Cheap: it stats a few files in private storage. */
+    private static final long POLL_MS = 1500;
+    /**
+     * The cadence while the starting card is up. A start is a chain of steps
+     * that each wait for a poll to notice the one before — the runtime asked
+     * for, then up, then its page loaded, then noVNC painting — so at POLL_MS
+     * every start also sat out a share of each tick on top of the work. Fast
+     * only for those few seconds: the card comes down and the poll is back to
+     * POLL_MS, and a start still not done after CONNECT_FAST_FOR_MS is not one
+     * that 4 Hz will rescue, so it goes back to POLL_MS too.
+     *
+     * Measured on the S25 (2026-11-07, LinuxOnDroid, cold starts): the card
+     * comes down at 1.7-2.0 s from the launch instead of 3.3-3.4 s, onto the
+     * desktop's backdrop with its panels still arriving, and the desktop is
+     * whole at 3.05-3.3 s instead of 3.3-3.4 s. The rest of a start is XFCE
+     * drawing itself inside the guest, which no poll can hurry. linux-rt.sh
+     * paints the X root in the backdrop colour so that the earlier card never
+     * comes down on black.
+     */
+    private static final long CONNECT_POLL_MS = 250;
+    private static final long CONNECT_FAST_FOR_MS = 30_000;
+    /**
+     * phase=none for this long means provisioning never started (state.env
+     * absent), so ask the service once.
+     */
+    private static final long NONE_KICK_MS = 10_000;
+    /**
+     * Cooldown between START sends. A cooldown rather than a once-flag: the
+     * service's "already running" check reads rt.pid, which the runtime writes
+     * a beat after the spawn — re-sending inside that gap would boot a second
+     * Xvnc, but never re-sending would leave a crashed runtime dead for as
+     * long as the window stays open.
+     */
+    private static final long START_RETRY_MS = 10_000;
+    /**
+     * noVNC page loads attempted before giving up: the first FAST_LOAD_TRIES
+     * CONNECT_POLL_MS apart, the rest one second apart.
+     */
+    private static final int MAX_LOAD_TRIES = 40;
+    /**
+     * The first load of a start usually lands before websockify is listening
+     * and is refused at once. A second's wait for the next try was a second
+     * of every start; eight quick ones cover the couple of seconds websockify
+     * can take on a slow phone, and a page still refused after them is back
+     * on the old one-second ladder. The ceiling for a page that never loads
+     * is 34 s rather than 40.
+     */
+    private static final int FAST_LOAD_TRIES = 8;
+    /** requestPermissions tag. Nothing reads the result — see askForNotifications. */
+    private static final int REQ_NOTIFICATIONS = 1;
+    /**
+     * How long the line Skip or Restart put up outlasts a poll that still shows
+     * the step it was for — a Restart's new run comes back to the same step.
+     */
+    private static final long STEP_ACTION_MS = 8_000;
+
+    private static final String UI_NONE = "";
+    private static final String UI_APPS = "apps";
+    private static final String UI_INSTALL = "install";
+    private static final String UI_START = "start";
+    private static final String UI_VNC = "vnc";
+    private static final String UI_ERROR = "error";
+
+    /**
+     * Open straight on the app chooser, whatever state the container is in.
+     * What the Linux tile's "Choose Linux apps…" sends; without it the chooser
+     * is shown once, before the first install, and never again.
+     */
+    static final String EXTRA_CHOOSE_APPS = "choose_apps";
+
+    private DexTheme theme;
+    /** Off-main thread for the status poll (it reads files, not a socket). */
+    private android.os.HandlerThread pollThread;
+    private Handler pollHandler;
+    /**
+     * The starting card is up, and since when — written on the main thread
+     * after every apply, read by the poll thread to pick its cadence. See
+     * CONNECT_POLL_MS.
+     */
+    private volatile boolean connecting;
+    private volatile long connectingSince;
+    private final Handler main = new Handler(Looper.getMainLooper());
+
+    private FrameLayout root;
+    /** Which of the four screens is up — so a poll only rebuilds on a change. */
+    private String uiState = UI_NONE;
+    private ProgressBar installBar;
+    private TextView installMsg;
+    /** Skip and Restart under the install line, for the step the script is on. */
+    private LinearLayout stepRow;
+    /** The step stepRow was built for, so a poll only rebuilds it on a change. */
+    private String shownStep;
+    /**
+     * The step a Skip or Restart was just sent for, when, and what the line
+     * says meanwhile — see {@link #stepActionPending}. Null when none is.
+     */
+    private String actedStep;
+    private long actedAt;
+    private String actedText;
+    /** The Skip / Restart question, so a second tap does not stack another one. */
+    private Dialog stepDialog;
+    private WebView webView;
+    /**
+     * The opaque "starting / connecting" card. It sits ON TOP of the WebView
+     * while the guest desktop boots and noVNC hands-shakes, so the user never
+     * sees a black half-loaded page — and its message updates with the real
+     * startup stage. Removed only once noVNC has actually painted a frame.
+     */
+    private FrameLayout startCard;
+    private TextView startMsg;
+    /** Set by the health probe once noVNC's canvas has a real framebuffer. */
+    private boolean vncConnected;
+
+    /**
+     * The chooser was asked for explicitly, rather than being the thing that
+     * has to happen before an install can start. Set by
+     * {@link #EXTRA_CHOOSE_APPS}, cleared when the screen is answered or
+     * dismissed — the poll would otherwise put the desktop back a beat later.
+     */
+    private boolean chooserForced;
+    /** The ticks, held across polls so a rebuild cannot lose them. */
+    private java.util.LinkedHashSet<String> appPicks;
+
+    /** When phase=none was first seen; 0 while it is anything else. */
+    private long noneSince;
+    /** The none-timer re-kick fires once per window, not once per poll. */
+    private boolean kicked;
+    private long startSentAt;
+    /**
+     * Set by Retry: phase stays "error" until the PC overwrites state.env,
+     * and without the latch the very next poll would flip the screen
+     * straight back to the error it just retried.
+     */
+    private boolean retryPending;
+    /**
+     * Latched when MAX_LOAD_TRIES runs out. Without it the error screen
+     * lives exactly one poll: the next ready+running status would re-enter
+     * showVnc, reset the counter and start another 40-try cycle — the
+     * terminal error state would flash for 1.5s forever. Cleared by Retry
+     * (which restarts the runtime) and by the runtime going away on its own.
+     */
+    private boolean connectFailed;
+    /**
+     * The rt pid the current WebView was built for. A loaded noVNC page never
+     * reconnects on its own, so when the runtime is replaced (session-end
+     * kill, crash, Retry's stop) the viewer must be rebuilt — and the swap is
+     * detected by IDENTITY, not by a RUNNING 0→1 edge: a stop+start can
+     * bounce entirely inside one poll period, which an edge check misses
+     * (measured on device — the window showed noVNC's "connection is closed"
+     * over a perfectly live desktop until closed and reopened).
+     */
+    private int shownRtPid;
+    /**
+     * Which window the loaded page was built for — see {@link #onPhone}. The
+     * viewer's default interaction method hangs off it (a phone has no pointer,
+     * so it opens as a trackpad; the desktop display has one, so the pointer
+     * goes where it is pointed), and the window can change displays under a
+     * page that is already up.
+     */
+    private boolean shownOnPhone;
+    /** The viewer URL without its ctx parameter — see {@link #vncUrl}. */
+    private String vncBase;
+    private int loadTries;
+    /**
+     * When the noVNC page was first seen reporting itself disconnected, 0
+     * while it is not. Time rather than a count of polls, so that the faster
+     * cadence under the card does not shorten the grace a dead page gets.
+     */
+    private long deadSince;
+    private boolean destroyed;
+    /**
+     * Latched when the user restarts an ended session, until the marker
+     * linux-rt.sh left behind is actually gone. LinuxService clears it
+     * asynchronously, so without the latch the next poll or two would put the
+     * same screen straight back up.
+     */
+    private boolean sessionRestartPending;
+    /** Title currently on the terminal screen, so a different one rebuilds it. */
+    private String shownActionTitle;
+    /** The close question, so a second ✕ does not stack another one. */
+    private Dialog closeDialog;
+
+    /**
+     * The live window, so {@link LinuxAppActivity} can tell WHERE it is.
+     * Weak, for the reason LauncherActivity's own live reference documents: a
+     * static strong reference to an Activity holds its whole view tree — and
+     * this one's is a WebView with a desktop in it.
+     */
+    private static java.lang.ref.WeakReference<LinuxActivity> live;
+
+    /**
+     * Is the one Linux window currently a window on the DESKTOP display?
+     *
+     * The app-list entry needs this and cannot get it any other way. It is not
+     * the same question as "is a desktop session running" (the window may be
+     * open on the phone while a session runs) and not the same as "is a window
+     * open" (the answer to that is yes in both places). Only the window itself
+     * knows which display it landed on, and it can be moved between them by the
+     * desktop's tile after it opens.
+     */
+    static boolean isOnDesktopDisplay() {
+        LinuxActivity a = live == null ? null : live.get();
+        if (a == null || a.isDestroyed() || a.isFinishing()) return false;
+        try {
+            return !a.onPhone();
+        } catch (Exception e) {
+            return false;   // a window without a display is not on the desktop
+        }
+    }
+
+    /**
+     * The caption's ✕. It arrives as a broadcast instead of a task removal
+     * because a removed task cannot ask anything — see
+     * {@link LauncherActivity#ACTION_CLOSE_WINDOW}.
+     */
+    private final BroadcastReceiver closeReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context ctx, Intent intent) {
+            // Addressed by activity name. This used to be the only window that
+            // asked before closing, so an unfiltered receiver was harmless;
+            // the Docker window asks too now, and both live in this process,
+            // so an unfiltered one would put BOTH questions on screen when
+            // either caption's ✕ was pressed.
+            String who = intent.getStringExtra("activity");
+            if (who != null && !LinuxActivity.class.getName().equals(who)) return;
+            confirmShutdown();
+        }
+    };
+
+    @Override
+    protected void attachBaseContext(Context base) {
+        super.attachBaseContext(DexLocale.wrap(base));
+    }
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        // The taskbar's only way to know this window exists — our own package
+        // has no icon on this desktop.
+        OwnWindows.opened(this);
+        live = new java.lang.ref.WeakReference<>(this);
+        theme = DexTheme.of(this);
+        root = new FrameLayout(this) {
+            @Override
+            public boolean dispatchKeyEvent(KeyEvent event) {
+                // ESC closes the window like Settings — but only while OUR
+                // chrome is up. Once the guest desktop is live, Escape
+                // belongs to it (vim, dialogs), not to the window.
+                if (event.getKeyCode() == KeyEvent.KEYCODE_ESCAPE
+                        && !UI_VNC.equals(uiState)) {
+                    if (event.getAction() == KeyEvent.ACTION_UP) {
+                        // On the chooser, Escape is Back: that screen can be
+                        // sitting over a live session (the tile's menu opens
+                        // it there), and finish() would take the container
+                        // down as a side effect of dismissing a dialog.
+                        if (UI_APPS.equals(uiState)) onBackPressed(); else finish();
+                    }
+                    return true;
+                }
+                return super.dispatchKeyEvent(event);
+            }
+        };
+        root.setBackground(theme.surface(theme.windowBg(), 0f));
+        setContentView(root);
+        applyInsets();
+        DexCursors.decorate(root);
+        chooserForced = getIntent() != null
+                && getIntent().getBooleanExtra(EXTRA_CHOOSE_APPS, false);
+        // Kick provisioning ourselves — the app owns it now, no PC push. Safe
+        // and idempotent: the service no-ops if the distro is already installed
+        // AND already carries this build's features, and it stays out of the
+        // way entirely while the app chooser has yet to be answered.
+        LinuxService.provision(this);
+        // Remote access, if the user left it on and something (an update, the
+        // system reclaiming memory) ended it. LinuxOnDroid has no desktop shell
+        // to do this at startup, so the window that IS the app does it.
+        LinuxService.remoteResume(this);
+        askForNotifications();
+        IntentFilter closeFilter = new IntentFilter(LauncherActivity.ACTION_CLOSE_WINDOW);
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(closeReceiver, closeFilter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(closeReceiver, closeFilter);
+        }
+        pollThread = new android.os.HandlerThread("linux-poll");
+        pollThread.start();
+        pollHandler = new Handler(pollThread.getLooper());
+        pollHandler.post(poll);
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        destroyed = true;
+        OwnWindows.closed(this);
+        // Only if it is still OURS: a display move destroys this instance after
+        // the replacement has already registered itself.
+        if (live != null && live.get() == this) live = null;
+        if (closeDialog != null) {
+            closeDialog.dismiss();
+            closeDialog = null;
+        }
+        if (stepDialog != null) {
+            stepDialog.dismiss();
+            stepDialog = null;
+        }
+        try {
+            unregisterReceiver(closeReceiver);
+        } catch (Exception ignored) {
+        }
+        if (pollThread != null) pollThread.quit();
+        dropWebView();
+        // No viewer left, so no reason to keep the container burning battery.
+        // This is onDestroy, not onStop, so a MINIMISED window keeps running.
+        //
+        // Except when the window is only being REBUILT. This activity does not
+        // declare `density` in its configChanges (the desktop activity does),
+        // so a Display size change destroys and recreates it — and stopping
+        // there would kill a live Ubuntu session because the user moved a
+        // slider in Settings.
+        if (!isChangingConfigurations()) LinuxService.stop(this);
+    }
+
+    /**
+     * The whole state machine hangs off this poll. It runs off the main thread
+     * (it stats a few files) and is deliberately NOT gated on onResume: on this
+     * desktop a window spends most of its life STOPPED behind other windows,
+     * and an install that only advanced while we were frontmost would look
+     * permanently stuck.
+     */
+    private final Runnable poll = new Runnable() {
+        @Override
+        public void run() {
+            final Linux.Status st = Linux.readStatus(LinuxActivity.this);
+            // Read the runtime log here (off-main) so the connecting screen can
+            // name the real startup stage.
+            final String rtLog = st.running ? Linux.rtLog(LinuxActivity.this) : "";
+            main.post(() -> {
+                apply(st, rtLog);
+                setConnecting(startCard != null);
+            });
+            // One chain only: setConnecting may have queued this from the main
+            // thread while it was running.
+            pollHandler.removeCallbacks(this);
+            boolean fast = connecting
+                    && SystemClock.uptimeMillis() - connectingSince < CONNECT_FAST_FOR_MS;
+            pollHandler.postDelayed(this, fast ? CONNECT_POLL_MS : POLL_MS);
+        }
+    };
+
+    /**
+     * The tile's "Choose Linux apps…" while this window is already open.
+     *
+     * This activity is singleTask, so that start lands here rather than
+     * building a second window — and without this the extra would be dropped
+     * on the floor and the menu entry would do nothing but raise the window.
+     */
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (intent == null || !intent.getBooleanExtra(EXTRA_CHOOSE_APPS, false)) return;
+        chooserForced = true;
+        showAppChooser();
+    }
+
+    /**
+     * Whether the starting card is up, for the poll's cadence. Every screen but
+     * the card goes through present(), which drops it, so the card being there
+     * is exactly "a start is on its way". On the way in, the slow poll already
+     * queued is brought forward — the first step of a start would otherwise
+     * still wait out a whole POLL_MS for it.
+     */
+    private void setConnecting(boolean now) {
+        if (now == connecting) return;
+        connecting = now;
+        if (!now) return;
+        connectingSince = SystemClock.uptimeMillis();
+        if (pollHandler != null) {
+            pollHandler.removeCallbacks(poll);
+            pollHandler.postDelayed(poll, CONNECT_POLL_MS);
+        }
+    }
+
+    /** One status → UI step. Main thread. */
+    private void apply(Linux.Status st, String rtLog) {
+        if (destroyed) return;
+        if (st == null) return;
+
+        // Ahead of every branch below, because none of them can make progress
+        // while this is true: with no choice made, provisioning is deliberately
+        // inert, so the window would sit on "waiting for the install to start"
+        // over the very screen that starts it. The forced case is the tile's
+        // menu entry, and it outranks a live session for the same reason a
+        // dialog does — the user asked for it.
+        // Never over an UNINSTALLED container, though: provisioning is
+        // deliberately inert there, so Install would be a button that does
+        // nothing. The branch further down closes the window instead, which is
+        // the right answer — opening Linux again is what reverses an uninstall.
+        if (!Linux.isUninstalled(this) && (chooserForced || Linux.needsAppChoice(this))) {
+            showAppChooser();
+            return;
+        }
+
+        if (!"error".equals(st.phase)) retryPending = false;
+        // A connect verdict is only about THIS runtime while it lives; a
+        // phase change or the runtime dying invalidates it.
+        if (!"ready".equals(st.phase) || !st.running) {
+            connectFailed = false;
+            vncConnected = false;
+        }
+
+        if ("error".equals(st.phase) && !retryPending) {
+            showError(s(R.string.ln_error), msgWords(st), st.step);
+            return;
+        }
+
+        if ("ready".equals(st.phase)) {
+            noneSince = 0;
+            if (connectFailed) return; // sticky error screen until Retry
+            if (!st.sessionEnded) sessionRestartPending = false;
+            // A session that ended by itself stays ended until the user says
+            // otherwise. The "no runtime? start one" rule below is what made a
+            // logout boot a fresh desktop a second later.
+            if (!st.running && st.sessionEnded && !sessionRestartPending) {
+                boolean clean = st.sessionExit == 0;
+                showAction(s(clean ? R.string.ln_session_ended : R.string.ln_session_failed),
+                        s(clean ? R.string.ln_session_ended_sub : R.string.ln_session_failed_sub),
+                        s(R.string.ln_session_start));
+                return;
+            }
+            if (st.running) {
+                ensureVnc(st);        // WebView loads underneath the card
+                probeVncHealth();     // async: sets vncConnected / reloads a dead page
+                if (vncConnected) {
+                    hideStartCard();  // reveal the live desktop
+                } else {
+                    showStartCard(connectingMsg(rtLog));
+                    // Keep nudging until we actually connect: harmless while the
+                    // runtime is healthy (the service dedups on its runtimeUp
+                    // flag), and it is what re-launches a stale runtime whose
+                    // pid file outlived it — the port would otherwise never open.
+                    requestStart();
+                }
+            } else {
+                requestStart();
+                enterStarting();
+            }
+            return;
+        }
+
+        // none / pushing / extracting / configuring / apt-update /
+        // installing-desktop — and "error" right after Retry, while the PC
+        // has yet to overwrite state.env
+        // The container can be uninstalled out from under this window, from the
+        // tile's own menu. Nothing below could make progress if it were —
+        // provision() is deliberately inert while uninstalled — so the window
+        // would sit on "waiting" for as long as it stayed open. Close instead.
+        if (Linux.isUninstalled(this)) {
+            finish();
+            return;
+        }
+        trackNone(st);
+        showInstalling(st);
+    }
+
+    private void trackNone(Linux.Status st) {
+        if (!"none".equals(st.phase)) {
+            noneSince = 0;
+            return;
+        }
+        long now = SystemClock.uptimeMillis();
+        if (noneSince == 0) {
+            noneSince = now;
+        } else if (now - noneSince > NONE_KICK_MS && !kicked) {
+            kicked = true;
+            LinuxService.provision(this);
+        }
+    }
+
+    /**
+     * Keep the window's content out from under the system bars.
+     *
+     * On the desktop display this does nothing at all — a scrcpy virtual
+     * display has no status bar and no gesture strip, so every inset is zero.
+     * It is the phone-only case this exists for: targetSdk 35 draws every
+     * activity edge-to-edge by default, so without it the viewer's control bar
+     * sits UNDER the status bar and the key row under the gesture strip.
+     *
+     * It has to be done here rather than in the page. `env(safe-area-inset-*)`
+     * is the obvious answer and is the wrong one: in a WebView those report the
+     * DISPLAY CUTOUT and never the system bars, so on a phone without a notch
+     * they are all zero while the status bar is very much there. The page has
+     * no safe-area handling of its own at all, deliberately: with the viewport
+     * already moved, a device where env() is NOT zero would be padded for the
+     * same cutout twice.
+     *
+     * Padding the root rather than letting the picture bleed under the bars is
+     * deliberate: this window is someone's desktop, and a status bar sitting on
+     * top of it would put XFCE's own panel and menus underneath.
+     */
+    private void applyInsets() {
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            int left, top, right, bottom;
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                android.graphics.Insets i = insets.getInsets(
+                        android.view.WindowInsets.Type.systemBars()
+                                | android.view.WindowInsets.Type.displayCutout());
+                left = i.left; top = i.top; right = i.right; bottom = i.bottom;
+            } else {
+                left = insets.getSystemWindowInsetLeft();
+                top = insets.getSystemWindowInsetTop();
+                right = insets.getSystemWindowInsetRight();
+                bottom = insets.getSystemWindowInsetBottom();
+            }
+            v.setPadding(left, top, right, bottom);
+            // Consume nothing: the WebView is a child of this view and the
+            // start card is its sibling, and both want to sit inside the
+            // padding just set rather than to see the insets themselves.
+            return insets;
+        });
+        root.requestApplyInsets();
+    }
+
+    /**
+     * Ask the service to boot the container at a sensible desktop size.
+     *
+     * The window's own pixels are the right answer on the desktop display: the
+     * viewer scales the framebuffer to the stage in CSS px, so a framebuffer
+     * sized in device pixels lands 1:1 whatever dpi the display-size preset
+     * picked. Up to a point: XFCE draws at 96 dpi whatever happens (its
+     * xsettings pin the scale at 1, for VNC's sake), so on a desktop fitted to
+     * a Retina or 4K screen — 320 dpi, two device pixels per dp — one for one
+     * would make it half the size of everything around it. There it gets whole
+     * device pixels per X pixel ({@link #pixelsPerGuestPixel}), drawn at the
+     * size it always had. They are the wrong answer on the phone's own panel: at density
+     * ~2.75 this window is ~972x2062 PIXELS, so Xvnc would be told to make a
+     * desktop that shape and the viewer would squeeze it back into ~354 CSS px
+     * of width. XFCE's 10 pt menus end up under a millimetre tall, and no
+     * amount of chrome design rescues that. The phone gets a fixed landscape
+     * desktop it pans and zooms around instead — which also means rotating the
+     * phone does not reflow XFCE.
+     *
+     * The two are told apart by DISPLAY, not by density. Density looks like it
+     * would work and does not: the desktop display's density is whatever
+     * SettingsActivity's resolution and size presets computed, 1.0 only at the
+     * 1080p preset (the same trap CaptionService documents), so a 1440p desktop
+     * would have taken the phone branch and booted a 1280x800 guest into a
+     * 2560-wide window.
+     */
+    private void requestStart() {
+        long now = SystemClock.uptimeMillis();
+        if (now - startSentAt < START_RETRY_MS) return;
+        startSentAt = now;
+        final int w, h;
+        if (onPhone()) {
+            w = 1280;
+            h = 800;
+        } else {
+            int k = pixelsPerGuestPixel();
+            w = Math.max(root.getWidth() / k, 800);
+            h = Math.max(root.getHeight() / k, 600);
+        }
+        LinuxService.start(this, w, h);
+        DexLog.step("linux", "START " + w + "x" + h);
+    }
+
+    /**
+     * Device pixels per guest pixel on the desktop: 1 around the usual 160 dpi,
+     * 2 from 280 (a desktop fitted to a 2x screen, or 1.75x of one), 3 from 440.
+     * Whole numbers only: the viewer then scales by exactly that, and XFCE's
+     * one-pixel lines stay one pixel wide instead of smearing across two.
+     */
+    private int pixelsPerGuestPixel() {
+        int dpi = getResources().getDisplayMetrics().densityDpi;
+        return Math.max(1, (int) Math.floor(dpi / 160.0 + 0.25));
+    }
+
+    /**
+     * Which of the two windows this is: the phone's whole screen (opened from
+     * the app list, through {@link LinuxAppActivity}) or a freeform window on
+     * the desktop display.
+     *
+     * By DISPLAY and not by density, for the reason requestStart spells out
+     * above — and not by "who started us" either: the desktop's tile can pull
+     * this same activity across from the phone's display, so the answer changes
+     * over the life of one window and has to be asked each time it matters.
+     * A null display is a window on its way out; treat that as the phone, which
+     * is the branch that assumes nothing.
+     */
+    private boolean onPhone() {
+        android.view.Display display = getDisplay();
+        return display == null
+                || display.getDisplayId() == android.view.Display.DEFAULT_DISPLAY;
+    }
+
+    /** The same two words the viewer page reads out of its URL. */
+    private static String ctxName(boolean phone) {
+        return phone ? "phone" : "desktop";
+    }
+
+    /**
+     * The viewer URL, with the context this window is in RIGHT NOW.
+     *
+     * ctx is here rather than in vncBase because the retry ladder and the health
+     * probe reload the page for the rest of the window's life, and a URL built
+     * once carries whichever display the window happened to open on. It picks
+     * the page's default interaction method — Mouse (a trackpad) on the phone,
+     * where there is no pointer, and Direct on the desktop, where a real one is
+     * driving — so a stale one would quietly hand a reloaded phone window the
+     * desktop's answer. The page remembers a method the user picks per context,
+     * so neither window's choice ever becomes the other's default.
+     */
+    private String vncUrl() {
+        return vncBase + "&ctx=" + ctxName(onPhone());
+    }
+
+    /**
+     * The only runtime permission this app asks anyone for, and only here.
+     *
+     * {@link LinuxService} is a foreground service, so from Android 13 its
+     * ongoing notification is the container's one visible presence: it says a
+     * Linux session is running, it is the way back to a window put aside with
+     * "keep running", and while the install is going it carries the progress.
+     * Without the grant the service still runs — the platform suppresses the
+     * notification, it does not refuse the service — so nothing here is
+     * load-bearing, which is exactly why this asks once and never insists.
+     *
+     * ON THE PHONE ONLY. In a DeX session this window is on a display the user
+     * is looking at through a PC, and the permission dialog is a system window
+     * that would open on the PHONE's screen — behind the user, unanswerable,
+     * and blocking the desktop window's own start. That session gets its
+     * permissions from the PC over adb and has never asked the phone for
+     * anything; this is the first prompt in the app, and it stays out of there.
+     *
+     * Asked as the window opens rather than when the container starts: opening
+     * this window IS starting a container (provision above, then the poll's
+     * START), so the notification is seconds away either way, and a dialog that
+     * arrives while the desktop is booting would land on top of the guest.
+     */
+    private void askForNotifications() {
+        if (android.os.Build.VERSION.SDK_INT < 33) return;
+        if (!onPhone()) return;
+        try {
+            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED) return;
+            // No result handler: the answer changes nothing we do. Android
+            // stops showing this of its own accord once it has been refused,
+            // so a window opened every day does not ask every day.
+            requestPermissions(
+                    new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIFICATIONS);
+        } catch (Exception e) {
+            DexLog.warn("linux", "could not ask about notifications", e);
+        }
+    }
+
+    /**
+     * Retry. Two different failures land on the error screen: a runtime we
+     * could not connect to (stop it and let the poll boot a fresh one) and a
+     * failed install (kick a fresh provision and watch).
+     */
+    private void retryProvision() {
+        if (connectFailed || Linux.rtExit(this).exists()) {
+            connectFailed = false;
+            // The stop below clears rt.exit, but asynchronously — hold the
+            // ended screen off until the poll actually sees it gone.
+            sessionRestartPending = true;
+            vncConnected = false;
+            loadTries = 0;
+            startSentAt = 0;
+            uiState = UI_NONE;
+            shownActionTitle = null;
+            LinuxService.stop(this);
+            enterStarting();
+            return;
+        }
+        LinuxService.provision(this);
+        leaveErrorForInstall();
+    }
+
+    /**
+     * From the error screen to the install screen, for a run that is on its
+     * way: the latch keeps the error the last run left in state.env from
+     * putting this screen straight back. Retry, and Skip on the error screen.
+     */
+    private void leaveErrorForInstall() {
+        retryPending = true;
+        kicked = true;          // the none-timer must not enqueue a second one
+        noneSince = 0;
+        loadTries = 0;
+        startSentAt = 0;
+        uiState = UI_NONE;
+        shownActionTitle = null;
+        showInstalling(new Linux.Status());
+    }
+
+    // ── closing ──
+
+    /**
+     * Back.
+     *
+     * It is the ONLY way out of this window on the phone — there is no caption
+     * and so no ✕ — and the default answer to it is the wrong one: finish()
+     * runs onDestroy, which stops the container. Pressing Back on a phone would
+     * have ended a live Ubuntu session, or aborted a 1.5 GB install, with no
+     * question asked and no way to say "I only wanted to look at something
+     * else".
+     *
+     * So Back asks the same question the caption's ✕ asks, and the dialog grows
+     * a "keep running" button on the phone (see confirmShutdown). It asks on the
+     * desktop display too: the ✕ was never the only route there either — a
+     * keyboard and scrcpy both deliver Back — and a silent shutdown behind one
+     * key press is no better with a title bar above it.
+     *
+     * Only while there is something to lose. On the error and idle screens
+     * there is no session and no install, so Back is just Back.
+     */
+    @Override
+    public void onBackPressed() {
+        // The chooser reached from the tile is sitting over something — a live
+        // session, an install, whatever the window was showing. Back means
+        // "never mind", not "close the window": dropping the flag lets the very
+        // next poll put that back.
+        if (UI_APPS.equals(uiState) && chooserForced) {
+            dismissChooser();
+            uiState = UI_NONE;
+            shownActionTitle = null;
+            return;
+        }
+        if (UI_VNC.equals(uiState) || UI_START.equals(uiState) || UI_INSTALL.equals(uiState)) {
+            confirmShutdown();
+            return;
+        }
+        super.onBackPressed();
+    }
+
+    /**
+     * The close question.
+     *
+     * Closing this window is not like closing the others: it ends a Linux
+     * session that may have editors, builds or downloads inside it, and nothing
+     * in the guest gets a chance to save. That is worth one confirmation. The
+     * alternative is spelled out rather than implied — MINIMISING keeps
+     * everything running, which is what people actually want most of the time.
+     *
+     * On the phone that alternative has to be a BUTTON, not a sentence: there is
+     * no taskbar to minimise into, and "put it aside" there means backgrounding
+     * the task — which is what moveTaskToBack does, and why the container
+     * survives it (onStop keeps everything; only onDestroy stops the service).
+     * It replaces Cancel rather than joining it: three buttons do not fit the
+     * 300dp panel this dialog is built to, and the dialog is cancelable, so Back
+     * and a tap outside still mean "never mind".
+     *
+     * Shut down goes through the service, which kills the runtime's whole
+     * process group; finishing the activity alone would only close the viewer.
+     */
+    private void confirmShutdown() {
+        if (isFinishing()) return;
+        if (closeDialog != null && closeDialog.isShowing()) return;
+
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(0x00000000));
+        }
+
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setBackground(plainFill(theme.windowBg(), 16));
+        panel.setPadding(dp(22), dp(20), dp(22), dp(14));
+
+        TextView head = new TextView(this);
+        head.setText(s(R.string.ln_close_title));
+        head.setTextColor(theme.text);
+        head.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(16));
+        head.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        panel.addView(head);
+
+        final boolean phone = onPhone();
+
+        TextView body = new TextView(this);
+        body.setText(s(phone ? R.string.ln_close_body_phone : R.string.ln_close_body));
+        body.setTextColor(theme.textDim);
+        body.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(12.5f));
+        LinearLayout.LayoutParams bodyLp = new LinearLayout.LayoutParams(
+                dp(300), ViewGroup.LayoutParams.WRAP_CONTENT);
+        bodyLp.topMargin = dp(8);
+        panel.addView(body, bodyLp);
+
+        LinearLayout buttons = new LinearLayout(this);
+        // Stacked on the phone, side by side on the desktop. "Keep running"
+        // beside "Shut down" already fills this 300dp panel in English and
+        // overflows it in German — and a clipped button is not a button.
+        buttons.setOrientation(phone ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
+        buttons.setGravity(Gravity.END);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rowLp.topMargin = dp(18);
+        if (phone) {
+            buttons.addView(dialogButton(s(R.string.ln_close_keep), theme.hover, theme.text,
+                    () -> {
+                        dialog.dismiss();
+                        // NOT finish(): the window has to stay alive for the
+                        // container to. moveTaskToBack is the phone's minimise.
+                        moveTaskToBack(true);
+                    }));
+        } else {
+            buttons.addView(dialogButton(s(R.string.ln_close_cancel), theme.hover, theme.text,
+                    dialog::dismiss));
+        }
+        buttons.addView(dialogButton(s(R.string.ln_close_shutdown), theme.danger, 0xFFFFFFFF,
+                () -> {
+                    dialog.dismiss();
+                    shutdownAndFinish();
+                }));
+        if (phone) {
+            // dialogButton builds for a row — wrap width, a left margin. In the
+            // stack each button is the panel's full width and the margin is
+            // above it, so a finger cannot miss and the destructive one is
+            // never where the other one just was.
+            for (int i = 0; i < buttons.getChildCount(); i++) {
+                LinearLayout.LayoutParams lp =
+                        (LinearLayout.LayoutParams) buttons.getChildAt(i).getLayoutParams();
+                lp.width = ViewGroup.LayoutParams.MATCH_PARENT;
+                lp.leftMargin = 0;
+                lp.topMargin = i == 0 ? 0 : dp(8);
+            }
+        }
+        panel.addView(buttons, rowLp);
+
+        DexFonts.applyTo(this, panel);
+        DexCursors.decorate(panel);
+        dialog.setContentView(panel);
+        closeDialog = dialog;
+        dialog.show();
+    }
+
+    /** The Remote access window, in a task of its own beside this one. */
+    private void openRemote() {
+        try {
+            startActivity(new Intent(this, LinuxRemoteActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        } catch (Exception e) {
+            DexLog.warn("remote", "cannot open the Remote access window", e);
+        }
+    }
+
+    /** Stop the container for real, then close the viewer. */
+    private void shutdownAndFinish() {
+        DexLog.step("linux", "shutdown requested");
+        LinuxService.stop(this);
+        finish();
+    }
+
+    private TextView dialogButton(String text, int fill, int textColor, Runnable onClick) {
+        TextView button = new TextView(this);
+        button.setText(text);
+        button.setTextColor(textColor);
+        button.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(13));
+        button.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        button.setGravity(Gravity.CENTER);
+        button.setPadding(dp(20), dp(9), dp(20), dp(9));
+        button.setBackground(tapBackground(fill, lighten(fill), 12));
+        button.setOnClickListener(v -> onClick.run());
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.leftMargin = dp(8);
+        button.setLayoutParams(lp);
+        return button;
+    }
+
+    // ── the five screens ──
+
+    /**
+     * What to install, asked once, before a single byte is downloaded.
+     *
+     * Ubuntu, XFCE and the VNC stack are not on it: they ARE the container,
+     * and a tick box that could switch off the desktop would be a tick box for
+     * an empty window. What is on it is the optional apps, with the original
+     * four ticked — so the plain Install button builds exactly the container
+     * this app built before the screen existed, and the screen only ever costs
+     * someone a tap unless they want it to cost them a download. The later
+     * arrivals — Node.js, GIMP, IntelliJ — start unticked for the same
+     * reason: a default must never buy a download nobody asked for.
+     *
+     * Nothing here uninstalls. Unticking means "do not fetch it", which is why
+     * the body text changes once there is a container: over a guest that
+     * already has Chromium in it, an unticked Chromium box that removed 300 MB
+     * of working software on Save would be a trap, and one that quietly did
+     * nothing would be a lie. It says which it is.
+     *
+     * Rebuilt only on a state change, like every other screen here: the poll
+     * runs every 1.5 s and a rebuild would put every tick back where it
+     * started while the user was still reading the list.
+     */
+    private void showAppChooser() {
+        if (UI_APPS.equals(uiState)) return;
+        uiState = UI_APPS;
+        // Seeded from what is stored, which is everything until it is not.
+        appPicks = new java.util.LinkedHashSet<>();
+        for (String id : Linux.OPTIONAL_APPS) {
+            if (Linux.wantsApp(this, id)) appPicks.add(id);
+        }
+
+        LinearLayout column = centeredColumn();
+        glyph(column);
+        title(column, s(R.string.ln_apps_title));
+        // "already installed" is keyed off the container, not off the forced
+        // flag: a reinstall asked for before the first container exists lands
+        // on this screen too, and there the first-run wording is the true one.
+        TextView body = subtext(column, s(Linux.isInstalled(this)
+                ? R.string.ln_apps_body_again : R.string.ln_apps_body));
+        // The only multi-line subtext in this window. Left to WRAP_CONTENT it
+        // is one line as wide as the desktop window happens to be.
+        body.getLayoutParams().width = dp(300);
+
+        final TextView go = primaryButton(s(R.string.ln_apps_go), null);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(
+                dp(300), ViewGroup.LayoutParams.WRAP_CONTENT);
+        listLp.topMargin = dp(16);
+        listLp.gravity = Gravity.CENTER_HORIZONTAL;
+        column.addView(list, listLp);
+
+        appOption(list, "firefox", R.string.ln_apps_firefox, R.string.ln_apps_firefox_sub, go);
+        appOption(list, "chromium", R.string.ln_apps_chromium, R.string.ln_apps_chromium_sub, go);
+        appOption(list, "code", R.string.ln_apps_code, R.string.ln_apps_code_sub, go);
+        appOption(list, "git", R.string.ln_apps_git, R.string.ln_apps_git_sub, go);
+        appOption(list, "nodejs", R.string.ln_apps_node, R.string.ln_apps_node_sub, go);
+        appOption(list, "gimp", R.string.ln_apps_gimp, R.string.ln_apps_gimp_sub, go);
+        appOption(list, "intellij", R.string.ln_apps_intellij, R.string.ln_apps_intellij_sub, go);
+
+        go.setText(goLabel());
+        go.setOnClickListener(v -> {
+            Linux.setApps(this, appPicks);
+            dismissChooser();
+            uiState = UI_NONE;
+            shownActionTitle = null;
+            noneSince = 0;
+            LinuxService.provision(this);
+            // Straight to the install screen rather than waiting up to 1.5 s
+            // for the poll to notice: this button is the one place in the flow
+            // where nothing at all happens on screen for a beat otherwise, and
+            // a tap that appears to do nothing gets tapped again.
+            //
+            // Only when there IS an install, though. Reopened from the tile and
+            // answered without changing anything, this button has nothing to
+            // do, and "waiting for the install to start" over a live desktop
+            // would be an install that never arrives. The next poll puts the
+            // window back where it was.
+            if (Linux.needsProvision(this)) showInstalling(new Linux.Status());
+        });
+        LinearLayout.LayoutParams goLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        goLp.topMargin = dp(22);
+        goLp.gravity = Gravity.CENTER_HORIZONTAL;
+        column.addView(go, goLp);
+
+        presentScrolling(column);
+    }
+
+    /**
+     * The chooser is done with — answered or waved away.
+     *
+     * The EXTRA has to go as well as the flag. This activity is destroyed and
+     * rebuilt whenever the window changes display, and it is rebuilt from the
+     * intent it was started with: a lingering extra would put the chooser back
+     * over the desktop every time the window was dragged to the other screen.
+     */
+    private void dismissChooser() {
+        chooserForced = false;
+        if (getIntent() != null) getIntent().removeExtra(EXTRA_CHOOSE_APPS);
+    }
+
+    /** "Install", or the plainer truth when every box is empty. */
+    private String goLabel() {
+        return s(appPicks.isEmpty() ? R.string.ln_apps_go_none : R.string.ln_apps_go);
+    }
+
+    /**
+     * One tickable row: the box, the name, and one line saying what it is.
+     *
+     * The whole row is the target and the CheckBox is not clickable in its own
+     * right. Two independently clickable things stacked on one another is how
+     * a tap on the label toggles nothing on a phone and a tap on the box
+     * toggles twice on the desktop, where the row also has a hover state.
+     */
+    private void appOption(LinearLayout list, String id, int nameRes, int subRes,
+                           TextView go) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(8), dp(9), dp(12), dp(9));
+        row.setBackground(tapBackground(0x00000000, theme.hover, 10));
+
+        final android.widget.CheckBox box = new android.widget.CheckBox(this);
+        box.setChecked(appPicks.contains(id));
+        box.setClickable(false);
+        box.setFocusable(false);
+        box.setButtonTintList(ColorStateList.valueOf(theme.accent));
+        row.addView(box, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout labels = new LinearLayout(this);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        TextView name = new TextView(this);
+        name.setText(s(nameRes));
+        name.setTextColor(theme.text);
+        name.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(13.5f));
+        name.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        labels.addView(name);
+        TextView sub = new TextView(this);
+        sub.setText(s(subRes));
+        sub.setTextColor(theme.textFaint);
+        sub.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(11.5f));
+        LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        subLp.topMargin = dp(1);
+        labels.addView(sub, subLp);
+        LinearLayout.LayoutParams labelsLp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        labelsLp.leftMargin = dp(6);
+        row.addView(labels, labelsLp);
+
+        row.setOnClickListener(v -> {
+            if (!appPicks.remove(id)) appPicks.add(id);
+            box.setChecked(appPicks.contains(id));
+            go.setText(goLabel());
+        });
+        list.addView(row, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+    }
+
+    private void showInstalling(Linux.Status st) {
+        if (UI_INSTALL.equals(uiState)) {
+            installBar.setProgress(st.pct);
+            installMsg.setText(stepActionPending(st) ? actedText : installText(st));
+            updateStepRow(st);
+            return;
+        }
+        uiState = UI_INSTALL;
+        LinearLayout column = centeredColumn();
+        glyph(column);
+        title(column, s(R.string.ln_installing));
+
+        installBar = new ProgressBar(this, null,
+                android.R.attr.progressBarStyleHorizontal);
+        installBar.setMax(100);
+        installBar.setProgress(st.pct);
+        installBar.setProgressTintList(ColorStateList.valueOf(theme.accent));
+        installBar.setProgressBackgroundTintList(ColorStateList.valueOf(theme.divider));
+        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(dp(300), dp(6));
+        barLp.topMargin = dp(20);
+        column.addView(installBar, barLp);
+
+        installMsg = subtext(column, stepActionPending(st) ? actedText : installText(st));
+        // Stacked on the phone, side by side on the desktop, as in the close
+        // question: "Skip IntelliJ IDEA Community" beside "Restart this step"
+        // is wider than a phone held upright.
+        stepRow = new LinearLayout(this);
+        stepRow.setOrientation(onPhone() ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
+        stepRow.setGravity(Gravity.CENTER_HORIZONTAL);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rowLp.topMargin = dp(18);
+        rowLp.gravity = Gravity.CENTER_HORIZONTAL;
+        column.addView(stepRow, rowLp);
+        shownStep = null;
+        updateStepRow(st);
+        present(column);
+    }
+
+    /**
+     * Skip and Restart, for the step the setup script says it is on: Skip only
+     * for one of the chooser's apps, Restart for those and the desktop itself.
+     * A long step with no way out but closing the desktop is what made people
+     * close it — which killed the step and started it over. Rebuilt only when
+     * the step changes, and away while a Skip or Restart is still being carried
+     * out, so a second tap cannot land on the run that is replacing this one.
+     */
+    private void updateStepRow(Linux.Status st) {
+        if (stepRow == null) return;
+        final String step = st.step == null ? "" : st.step;
+        if (stepActionPending(st) || !Linux.isRestartableStep(step)) {
+            stepRow.setVisibility(android.view.View.GONE);
+            return;
+        }
+        if (!step.equals(shownStep)) {
+            shownStep = step;
+            stepRow.removeAllViews();
+            if (Linux.isSkippableStep(step)) {
+                stepRow.addView(dialogButton(getString(R.string.ln_step_skip, stepName(step)),
+                        theme.hover, theme.text, () -> askSkip(step, false)));
+            }
+            stepRow.addView(dialogButton(s(R.string.ln_step_restart), theme.hover, theme.text,
+                    () -> askRestart(step)));
+            boolean stacked = stepRow.getOrientation() == LinearLayout.VERTICAL;
+            for (int i = 0; i < stepRow.getChildCount(); i++) {
+                LinearLayout.LayoutParams lp =
+                        (LinearLayout.LayoutParams) stepRow.getChildAt(i).getLayoutParams();
+                lp.leftMargin = stacked || i == 0 ? 0 : dp(8);
+                lp.topMargin = stacked && i > 0 ? dp(8) : 0;
+                lp.gravity = Gravity.CENTER_HORIZONTAL;
+            }
+            // present() styled what was there when the screen went up; a row
+            // rebuilt for a later step has to be styled on its own.
+            DexFonts.applyTo(this, stepRow);
+            DexCursors.decorate(stepRow);
+        }
+        stepRow.setVisibility(android.view.View.VISIBLE);
+    }
+
+    /**
+     * Is a Skip or Restart still being carried out? Over the moment the screen
+     * shows anything but the step it was for — the service's own "resuming"
+     * line names no step at all — or, since a Restart's new run comes straight
+     * back to the same step, once that run has had a few seconds to begin.
+     */
+    private boolean stepActionPending(Linux.Status st) {
+        if (actedStep == null) return false;
+        boolean over = !actedStep.equals(st.step)
+                || SystemClock.uptimeMillis() - actedAt > STEP_ACTION_MS;
+        if (over) actedStep = null;
+        return !over;
+    }
+
+    /** Say what was just asked for, in place of the line it replaces, and put the buttons away. */
+    private void markStepAction(String step, String text) {
+        actedStep = step;
+        actedAt = SystemClock.uptimeMillis();
+        actedText = text;
+        if (UI_INSTALL.equals(uiState) && installMsg != null) installMsg.setText(text);
+        if (stepRow != null) stepRow.setVisibility(android.view.View.GONE);
+    }
+
+    /** Skip, asked first: the step's app comes off the list, and the install goes on without it. */
+    private void askSkip(String step, boolean fromError) {
+        final String name = stepName(step);
+        confirmStep(getString(R.string.ln_step_skip_title, name),
+                getString(R.string.ln_step_skip_body, s(R.string.ln_apps_menu)),
+                s(R.string.ln_step_skip_go), () -> {
+                    LinuxService.skipStep(this, step);
+                    if (fromError) leaveErrorForInstall();
+                    markStepAction(step, getString(R.string.ln_step_skipping, name));
+                });
+    }
+
+    /** Restart, asked first: the step stops and runs again from its beginning. */
+    private void askRestart(String step) {
+        confirmStep(s(R.string.ln_step_restart_title), s(R.string.ln_step_restart_body),
+                s(R.string.ln_step_restart_go), () -> {
+                    LinuxService.restartStep(this, step);
+                    markStepAction(step, s(R.string.ln_step_restarting));
+                });
+    }
+
+    /** The name the chooser gives a step's app, for the buttons and the questions. */
+    private String stepName(String step) {
+        switch (step) {
+            case "firefox": return s(R.string.ln_apps_firefox);
+            case "chromium": return s(R.string.ln_apps_chromium);
+            case "code": return s(R.string.ln_apps_code);
+            case "git": return s(R.string.ln_apps_git);
+            case "nodejs": return s(R.string.ln_apps_node);
+            case "gimp": return s(R.string.ln_apps_gimp);
+            case "intellij": return s(R.string.ln_apps_intellij);
+            default: return step;
+        }
+    }
+
+    /**
+     * The one question behind Skip and Restart: what happens, and a way out.
+     * Built like the close question, and asked for the same reason — both
+     * throw away what the step has done so far.
+     */
+    private void confirmStep(String titleText, String bodyText, String goLabel, Runnable go) {
+        if (isFinishing()) return;
+        if (stepDialog != null && stepDialog.isShowing()) return;
+
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(0x00000000));
+        }
+
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setBackground(plainFill(theme.windowBg(), 16));
+        panel.setPadding(dp(22), dp(20), dp(22), dp(14));
+
+        TextView head = new TextView(this);
+        head.setText(titleText);
+        head.setTextColor(theme.text);
+        head.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(16));
+        head.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        panel.addView(head);
+
+        TextView body = new TextView(this);
+        body.setText(bodyText);
+        body.setTextColor(theme.textDim);
+        body.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(12.5f));
+        LinearLayout.LayoutParams bodyLp = new LinearLayout.LayoutParams(
+                dp(300), ViewGroup.LayoutParams.WRAP_CONTENT);
+        bodyLp.topMargin = dp(8);
+        panel.addView(body, bodyLp);
+
+        LinearLayout buttons = new LinearLayout(this);
+        buttons.setOrientation(LinearLayout.HORIZONTAL);
+        buttons.setGravity(Gravity.END);
+        buttons.addView(dialogButton(s(R.string.ln_close_cancel), theme.hover, theme.text,
+                dialog::dismiss));
+        buttons.addView(dialogButton(goLabel, theme.accent, 0xFFFFFFFF, () -> {
+            dialog.dismiss();
+            go.run();
+        }));
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rowLp.topMargin = dp(18);
+        panel.addView(buttons, rowLp);
+
+        DexFonts.applyTo(this, panel);
+        DexCursors.decorate(panel);
+        dialog.setContentView(panel);
+        stepDialog = dialog;
+        dialog.show();
+    }
+
+    /** Runtime not up yet: our card only, no WebView behind it. */
+    private void enterStarting() {
+        if (webView != null) dropWebView();
+        uiState = UI_START;
+        showStartCard(s(R.string.ln_stage_display));
+    }
+
+    /**
+     * The startup narration, from what the runtime log actually shows: the X
+     * server coming up, then the desktop services, then the VNC handshake. A
+     * lingering connect adds the attempt count so it never looks frozen.
+     */
+    private String connectingMsg(String rtLog) {
+        if (rtLog == null) rtLog = "";
+        if (!rtLog.contains("Listening for VNC") && !rtLog.contains("VNC server")) {
+            return s(R.string.ln_stage_display);
+        }
+        if (!rtLog.contains("6080")) {
+            return s(R.string.ln_stage_services);
+        }
+        String msg = s(R.string.ln_stage_connecting);
+        // About three seconds in, as before the first tries came faster.
+        if (loadTries > FAST_LOAD_TRIES + 1) msg = msg + "  (" + loadTries + ")";
+        return msg;
+    }
+
+    /** Build (once) / update the opaque starting-connecting overlay, on top. */
+    private void showStartCard(String msg) {
+        if (startCard == null) {
+            // Drop any install column, but keep a WebView loading underneath.
+            for (int i = root.getChildCount() - 1; i >= 0; i--) {
+                if (root.getChildAt(i) != webView) root.removeViewAt(i);
+            }
+            FrameLayout card = new FrameLayout(this);
+            card.setBackground(theme.surface(theme.windowBg(), 0f));
+
+            LinearLayout column = centeredColumn();
+            glyph(column);
+            title(column, s(R.string.ln_starting));
+            ProgressBar spinner = new ProgressBar(this);
+            spinner.setIndeterminate(true);
+            spinner.setIndeterminateTintList(ColorStateList.valueOf(theme.accent));
+            LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(dp(30), dp(30));
+            slp.topMargin = dp(18);
+            slp.gravity = Gravity.CENTER_HORIZONTAL;
+            column.addView(spinner, slp);
+            startMsg = subtext(column, msg);
+
+            FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            clp.gravity = Gravity.CENTER;
+            card.addView(column, clp);
+            DexFonts.applyTo(this, card);
+            DexCursors.decorate(card);
+
+            root.addView(card, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            startCard = card;
+        } else {
+            startMsg.setText(msg);
+            root.bringChildToFront(startCard); // stay above a freshly rebuilt WebView
+        }
+    }
+
+    private void hideStartCard() {
+        if (startCard == null) return;
+        root.removeView(startCard);
+        startCard = null;
+        startMsg = null;
+        // The WebView went in at index 0, under an opaque card, and nothing
+        // ever focused it. The viewer's keyboard button raises the IME by
+        // focusing a field inside the page, which cannot happen in a view that
+        // has never held window focus.
+        if (webView != null) webView.requestFocus();
+    }
+
+    /** Build the WebView (once, or on a runtime swap) underneath the card. */
+    private void ensureVnc(Linux.Status st) {
+        final boolean phone = onPhone();
+        if (UI_VNC.equals(uiState) && webView != null && st.rtPid == shownRtPid) {
+            // Same runtime, same page — but possibly not the same display any
+            // more. The tile can pull this window onto the desktop and the app
+            // icon opens it back on the phone, and the page's DEFAULT
+            // interaction method (and its chrome) is decided by which one it is.
+            //
+            // Rare on purpose: this activity does not declare `density` in its
+            // configChanges, so a display change normally recreates it and the
+            // page is rebuilt with the right ctx in its URL. This is the leg for
+            // two displays that agree on density, where the platform hands us a
+            // plain configuration change instead and the page never reloads.
+            if (phone != shownOnPhone) {
+                shownOnPhone = phone;
+                webView.evaluateJavascript(
+                        "window.dexContext && window.dexContext('" + ctxName(phone) + "')", null);
+                DexLog.step("linux", "viewer context -> " + ctxName(phone));
+            }
+            return;
+        }
+        uiState = UI_VNC;
+        shownRtPid = st.rtPid;
+        shownOnPhone = phone;
+        loadTries = 0;
+        vncConnected = false;
+        dropWebView();
+        webView = new WebView(this);
+        webView.setBackgroundColor(theme.windowBg());
+        // WebView's own selection handles and magnifier have nothing to grab
+        // over a canvas, and a long press is the guest's right-click.
+        webView.setLongClickable(false);
+        webView.setOnLongClickListener(v -> true);
+        WebSettings settings = webView.getSettings();
+        // noVNC is all JavaScript (canvas + websocket), and keeps its input
+        // preferences in localStorage
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(true);
+        // Text zoom otherwise follows the system font scale, and a phone at
+        // 130% inflates the viewer's whole control bar.
+        settings.setTextZoom(100);
+        // dex.html is ours (assets/linux/novnc/, staged into the guest beside
+        // Ubuntu's own pages by LinuxService.stageViewer). It owns its own
+        // scaling, so no &scale; and `v` is the runtime pid, which is exactly
+        // the version of the staged files — websockify sends no Cache-Control,
+        // and without a changing query the WebView happily serves yesterday's
+        // page out of its heuristic cache.
+        //
+        // The ctx half is appended at every load rather than baked in here —
+        // see vncUrl().
+        vncBase = "http://127.0.0.1:" + st.port
+                + "/dex.html?password=" + st.pass + "&v=" + st.rtPid;
+        webView.setWebViewClient(new WebViewClient() {
+            /** RUNNING=1 means the session leader is alive, not that websockify
+             *  is accepting yet — the first load usually races it. Keep
+             *  knocking; a port that never opens is an error. */
+            private void fail(WebView view) {
+                if (++loadTries > MAX_LOAD_TRIES) {
+                    connectFailed = true;
+                    showError(s(R.string.ln_connect_failed), null);
+                    return;
+                }
+                main.postDelayed(() -> {
+                    if (!destroyed && UI_VNC.equals(uiState)) view.loadUrl(vncUrl());
+                }, loadTries <= FAST_LOAD_TRIES ? CONNECT_POLL_MS : 1000);
+            }
+
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest request,
+                                        WebResourceError error) {
+                if (request.isForMainFrame()) fail(view);
+            }
+
+            // onReceivedError does NOT fire for HTTP status codes, and a page
+            // that 404s still "loads": without this a mis-staged viewer would
+            // sit on "Connecting to the desktop… (n)" forever and never reach
+            // the error screen with its Retry.
+            @Override
+            public void onReceivedHttpError(WebView view, WebResourceRequest request,
+                                            WebResourceResponse response) {
+                if (request.isForMainFrame()) fail(view);
+            }
+
+            // The viewer's Remote access button. A navigation and not a
+            // JavaScript bridge, on purpose: this page is served from INSIDE
+            // the guest, and a bridge would hand anything running in Linux a
+            // way to call into the app. A link to one of our own windows is
+            // all it can ever be, so that is all it is.
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                if ("dexremote".equals(request.getUrl().getScheme())) {
+                    openRemote();
+                    return true;
+                }
+                return false;
+            }
+        });
+        // Index 0: always BELOW the starting/connecting card if one is up.
+        // Keeps the shell's arrow (inherited from root) rather than being hidden
+        // with ROLE_NONE. The Linux guest's X server draws its own cursor INTO
+        // the framebuffer, so there are briefly two here — but hiding ours
+        // would leave a dead area whenever the guest is not drawing one yet,
+        // and a doubled pointer is the lesser of those two.
+        root.addView(webView, 0, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        webView.loadUrl(vncUrl());
+        DexLog.step("linux", "vnc client loading port " + st.port
+                + " as " + ctxName(phone));
+    }
+
+    /**
+     * A noVNC page that loaded fine but lost (or never won) its WebSocket
+     * shows "connection is closed" FOREVER — it has no reconnect, and
+     * onReceivedError never fires because the page load itself succeeded
+     * (measured: the first load races the booting Xvnc and dies with ws code
+     * 1006). So while the runtime is up, each poll reads the page's own
+     * status element and reloads a self-declared-dead page, on the same try
+     * budget as load failures.
+     */
+    private void probeVncHealth() {
+        if (!UI_VNC.equals(uiState) || webView == null) return;
+        webView.evaluateJavascript(
+                // Two facts in one round-trip: is noVNC actually painting (its
+                // canvas has a real framebuffer size) and what does its status
+                // line say. Returns "<0|1>|<status text>".
+                //
+                // This is a CONTRACT with the page, not an inspection of it:
+                // dex.html keeps a hidden #status carrying frozen English
+                // literals for exactly these three tokens, and keeps its only
+                // canvas inside #screen. See doc/linux-viewer.md. The
+                // 'noVNC_status' fallback is Ubuntu's own vnc.html, which is
+                // still on disk and can still be loaded by hand.
+                "(function(){"
+                        + "var s=document.getElementById('status')"
+                        + "||document.getElementById('noVNC_status');"
+                        + "var t=s&&s.textContent?s.textContent:'';"
+                        + "var c=document.querySelector('#screen canvas')"
+                        + "||document.querySelector('canvas');"
+                        + "var up=(c&&c.width>0&&c.height>0)?1:0;"
+                        + "return up+'|'+t;})()",
+                raw -> {
+                    if (destroyed || !UI_VNC.equals(uiState) || webView == null) return;
+                    if (raw == null) return;
+                    // strip evaluateJavascript's surrounding quotes
+                    String v = raw.length() >= 2 && raw.charAt(0) == '"'
+                            ? raw.substring(1, raw.length() - 1) : raw;
+                    boolean painting = v.startsWith("1|");
+                    String text = v.length() > 2 ? v.substring(2) : "";
+                    if (painting) {
+                        // The desktop is actually on screen — take the card down
+                        // and keep it down for this runtime.
+                        vncConnected = true;
+                        deadSince = 0;
+                        loadTries = 0;
+                        hideStartCard();
+                        return;
+                    }
+                    boolean dead = text.contains("closed") || text.contains("Failed")
+                            || text.contains("went wrong");
+                    if (!dead) {
+                        deadSince = 0;
+                        return; // still connecting — the card stays up with its stage message
+                    }
+                    // A POLL_MS of grace, as one poll of it always was.
+                    long now = SystemClock.uptimeMillis();
+                    if (deadSince == 0) deadSince = now;
+                    if (now - deadSince < POLL_MS) return;
+                    deadSince = 0;
+                    vncConnected = false;
+                    if (++loadTries > MAX_LOAD_TRIES) {
+                        connectFailed = true;
+                        showError(s(R.string.ln_connect_failed), null);
+                        return;
+                    }
+                    // loadUrl and not reload(): the same page either way, except
+                    // that this one is built with the display the window is on
+                    // NOW (see vncUrl).
+                    webView.loadUrl(vncUrl());
+                });
+    }
+
+    private void showError(String titleText, String detail) {
+        showError(titleText, detail, null);
+    }
+
+    /**
+     * The error screen. When what failed is a step the user can do without —
+     * one of the chooser's apps — Skip sits beside Retry: an app that will not
+     * install here must not stand between someone and the rest of Linux. In
+     * practice that is a browser, the only optional step whose failure ends
+     * the run; the others note theirs in the log and carry on.
+     */
+    private void showError(String titleText, String detail, String failedStep) {
+        showAction(titleText, detail, s(R.string.ln_retry),
+                Linux.isSkippableStep(failedStep) ? failedStep : null);
+    }
+
+    /**
+     * The terminal screen: a title, an optional line of detail, and one button
+     * that puts a fresh runtime up. Three different endings share it — a failed
+     * install, a viewer that could not connect, and a session that ended — so
+     * the rebuild check is on the TITLE, not just on being in this state.
+     */
+    private void showAction(String titleText, String detail, String buttonLabel) {
+        showAction(titleText, detail, buttonLabel, null);
+    }
+
+    /** ...and, for a failed step that can be done without, Skip beside the button. */
+    private void showAction(String titleText, String detail, String buttonLabel,
+                            String skipStep) {
+        if (UI_ERROR.equals(uiState) && titleText.equals(shownActionTitle)) return;
+        uiState = UI_ERROR;
+        shownActionTitle = titleText;
+        LinearLayout column = centeredColumn();
+        glyph(column);
+        title(column, titleText);
+        if (detail != null && !detail.isEmpty()) subtext(column, detail);
+
+        TextView retry = primaryButton(buttonLabel, this::retryProvision);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(20);
+        lp.gravity = Gravity.CENTER_HORIZONTAL;
+        if (skipStep == null) {
+            column.addView(retry, lp);
+        } else {
+            boolean stacked = onPhone();
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(stacked ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER);
+            row.addView(retry);
+            TextView skip = dialogButton(getString(R.string.ln_step_skip, stepName(skipStep)),
+                    theme.hover, theme.text, () -> askSkip(skipStep, true));
+            LinearLayout.LayoutParams skipLp = (LinearLayout.LayoutParams) skip.getLayoutParams();
+            skipLp.leftMargin = stacked ? 0 : dp(10);
+            skipLp.topMargin = stacked ? dp(10) : 0;
+            skipLp.gravity = Gravity.CENTER_HORIZONTAL;
+            row.addView(skip);
+            column.addView(row, lp);
+        }
+        present(column);
+    }
+
+    /** The accent-filled button this window uses for its one real action. */
+    private TextView primaryButton(String label, Runnable onClick) {
+        TextView button = new TextView(this);
+        button.setText(label);
+        button.setTextColor(0xFFFFFFFF);
+        button.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(13));
+        button.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        button.setGravity(Gravity.CENTER);
+        button.setPadding(dp(26), dp(10), dp(26), dp(10));
+        button.setBackground(tapBackground(theme.accent, lighten(theme.accent), 12));
+        if (onClick != null) button.setOnClickListener(v -> onClick.run());
+        return button;
+    }
+
+    // ── building blocks ──
+
+    private LinearLayout centeredColumn() {
+        LinearLayout column = new LinearLayout(this);
+        column.setOrientation(LinearLayout.VERTICAL);
+        column.setGravity(Gravity.CENTER_HORIZONTAL);
+        return column;
+    }
+
+    /** Swap the built column in as the window's centered content. */
+    private void present(LinearLayout column) {
+        dropWebView();
+        // The connecting card is one of the views being cleared; forget it too
+        // so a later showStartCard rebuilds instead of updating a dead view.
+        startCard = null;
+        startMsg = null;
+        root.removeAllViews();
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.gravity = Gravity.CENTER;
+        root.addView(column, lp);
+        DexFonts.applyTo(this, column);
+        DexCursors.decorate(column);
+    }
+
+    /**
+     * The same swap, for content that will not always fit.
+     *
+     * The other four screens are a glyph, a line and a button and are centred
+     * with confidence. The chooser is a title, a paragraph, seven two-line
+     * rows and a button, and a phone held in landscape has barely 300 dp of height
+     * for it — where {@link #present} would simply centre it and clip both
+     * ends, taking the Install button with them. fillViewport plus a centring
+     * holder keeps it centred while it fits and scrolls it when it does not.
+     */
+    private void presentScrolling(LinearLayout column) {
+        dropWebView();
+        startCard = null;
+        startMsg = null;
+        root.removeAllViews();
+
+        LinearLayout holder = new LinearLayout(this);
+        holder.setOrientation(LinearLayout.VERTICAL);
+        holder.setGravity(Gravity.CENTER);
+        holder.setPadding(dp(20), dp(20), dp(20), dp(20));
+        holder.addView(column, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        android.widget.ScrollView scroller = new android.widget.ScrollView(this);
+        scroller.setFillViewport(true);
+        scroller.addView(holder, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        root.addView(scroller, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        DexFonts.applyTo(this, scroller);
+        DexCursors.decorate(scroller);
+    }
+
+    /** The WebView holds a websocket and a decoder — never leave one behind. */
+    private void dropWebView() {
+        if (webView == null) return;
+        root.removeView(webView);
+        webView.destroy();
+        webView = null;
+    }
+
+    private void glyph(LinearLayout column) {
+        TextView penguin = new TextView(this);
+        penguin.setText("🐧");
+        penguin.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(44));
+        penguin.setGravity(Gravity.CENTER_HORIZONTAL);
+        column.addView(penguin);
+    }
+
+    private void title(LinearLayout column, String text) {
+        TextView title = new TextView(this);
+        title.setText(text);
+        title.setTextColor(theme.text);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(17));
+        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        title.setGravity(Gravity.CENTER_HORIZONTAL);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(18);
+        lp.gravity = Gravity.CENTER_HORIZONTAL;
+        column.addView(title, lp);
+    }
+
+    private TextView subtext(LinearLayout column, String text) {
+        TextView sub = new TextView(this);
+        sub.setText(text);
+        sub.setTextColor(theme.textFaint);
+        sub.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(12));
+        sub.setGravity(Gravity.CENTER_HORIZONTAL);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(8);
+        lp.gravity = Gravity.CENTER_HORIZONTAL;
+        column.addView(sub, lp);
+        return sub;
+    }
+
+    /** What the progress subtext says for this status. */
+    private String installText(Linux.Status st) {
+        // "error" reaches here only behind the Retry latch, where the honest
+        // reading is the same as none's: nothing has started yet.
+        if ("none".equals(st.phase) || "error".equals(st.phase)) {
+            return s(R.string.ln_waiting);
+        }
+        // How far through its step, when the script can tell: a line that
+        // moves is the difference between a long step and one that looks hung.
+        String words = msgWords(st);
+        return st.stepPct >= 0 ? words + " · " + st.stepPct + "%" : words;
+    }
+
+    /**
+     * state.env's MSG is dash-separated-no-whitespace; undo that for people.
+     *
+     * A colon, when the script sends one, separates the verb from a name the
+     * script did not invent — "setting-up:libgtk-3-0t64". Only the verb is
+     * de-dashed: a package name's dashes are part of it, and replacing those
+     * too rendered it "setting up libgtk 3 0t64", which reads as four things
+     * instead of one. No colon means the whole token is ours, and the old
+     * blanket rule is still right for it.
+     */
+    private static String msgWords(Linux.Status st) {
+        String m = "-".equals(st.msg) ? st.phase : st.msg;
+        int c = m.indexOf(':');
+        if (c < 0) return m.replace('-', ' ');
+        return (m.substring(0, c).replace('-', ' ') + " " + m.substring(c + 1)).trim();
+    }
+
+    // ── measurements ──
+
+    private int dp(float v) {
+        return Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v,
+                getResources().getDisplayMetrics()));
+    }
+
+    private float sp(float v) {
+        return TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v,
+                getResources().getDisplayMetrics());
+    }
+
+    private String s(int res) {
+        return getString(res);
+    }
+
+    // ── drawables (the launcher's button idiom, private copy) ──
+
+    private GradientDrawable plainFill(int color, float radiusDp) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(color);
+        d.setCornerRadius(dp(theme.radius(radiusDp)));
+        return d;
+    }
+
+    /** Rest / hover / ripple — this desktop is mouse-driven, so hover matters. */
+    private Drawable tapBackground(int restColor, int hoverColor, float radiusDp) {
+        StateListDrawable content = new StateListDrawable();
+        content.addState(new int[]{android.R.attr.state_hovered}, plainFill(hoverColor, radiusDp));
+        content.addState(new int[0], plainFill(restColor, radiusDp));
+        return new RippleDrawable(ColorStateList.valueOf(theme.ripple), content,
+                plainFill(0xFFFFFFFF, radiusDp));
+    }
+
+    private static int lighten(int color) {
+        return Color.argb(Color.alpha(color),
+                Math.min(255, Color.red(color) + 24),
+                Math.min(255, Color.green(color) + 24),
+                Math.min(255, Color.blue(color) + 24));
+    }
+}

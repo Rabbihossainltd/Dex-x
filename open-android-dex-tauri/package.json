@@ -1,0 +1,44 @@
+{
+  "name": "dex-x",
+  "private": true,
+  "version": "0.3.32",
+  "description": "A desktop for your Android phone, on your Windows PC.",
+  "author": "Rabbi Hossain",
+  "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Rabbihossainltd/Dex-x.git"
+  },
+  "homepage": "https://github.com/Rabbihossainltd/Dex-x",
+  "bugs": {
+    "url": "https://github.com/Rabbihossainltd/Dex-x/issues"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "apk": "node scripts/build-launcher-apk.mjs",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
+    "@tauri-apps/plugin-log": "^2.9.0",
+    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-os": "^2.3.2",
+    "@tauri-apps/plugin-store": "^2.4.4",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "tailwindcss": "^4.3.3"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.6.0",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.4"
+  }
+}

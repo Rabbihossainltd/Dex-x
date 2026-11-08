@@ -1,0 +1,56 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Dex-X",
+  "version": "0.3.32",
+  "identifier": "com.ccrstech.openandroiddex",
+  "build": {
+    "beforeDevCommand": "npm run apk && npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run apk && npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Dex-X",
+        "width": 720,
+        "height": 640,
+        "minWidth": 600,
+        "minHeight": 460,
+        "center": true,
+        "decorations": false,
+        "create": false,
+        "backgroundColor": "#090b10"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [
+      "resources/bin",
+      "resources/icon",
+      "resources/THIRD_PARTY_LICENSES.md"
+    ],
+    "publisher": "Dex-X",
+    "copyright": "Copyright (C) 2026 Rabbi Hossain. Based on Open Android DeX, Copyright (C) 2026 Idrees Khan.",
+    "license": "GPL-3.0-or-later",
+    "licenseFile": "../../LICENSE",
+    "homepage": "https://github.com/Rabbihossainltd/Dex-x",
+    "shortDescription": "A desktop for your Android phone, on your Windows PC",
+    "longDescription": "Dex-X turns your Android phone into a desktop on your Windows PC: real windows, a taskbar, your notifications. Your phone keeps its own screen."
+  }
+}

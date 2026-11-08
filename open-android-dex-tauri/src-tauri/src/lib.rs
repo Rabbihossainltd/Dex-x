@@ -1,0 +1,213 @@
+mod adb;
+mod apps;
+mod diag;
+mod display;
+mod embed;
+mod files;
+mod gestures;
+mod hotkeys;
+mod notifications;
+mod projection;
+mod quit;
+mod remote;
+mod remote_desktop;
+mod remote_usb;
+mod scrcpy;
+mod shell;
+mod transfer;
+mod wireless;
+mod wm;
+
+/// One phone app's window and nothing else, for trying it by hand —
+/// examples/app_window.rs. Not part of the app.
+#[cfg(windows)]
+#[doc(hidden)]
+pub fn app_window_probe(serial: &str, socket: &str, pkg: &str, label: &str, icon_png: Option<Vec<u8>>) -> Result<(), String> {
+    apps::probe(serial, socket, pkg, label, icon_png)
+}
+
+/// `ssh-proxy`: when ssh runs this binary as a phone's ProxyCommand, that is
+/// all it is — see remote::run_cli. `Some(exit code)` when it was that.
+pub fn remote_cli() -> Option<i32> {
+    remote::run_cli()
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    // A phone app opened at start (a pinned taskbar button) is timed from here.
+    apps::note_start();
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(desktop)]
+    {
+        // note: no window-state plugin — the launcher window is a fixed-size
+        // status surface; tauri.conf.json is the single source of truth.
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            // A phone app pinned to the taskbar, clicked: its window, not this one.
+            if apps::open_from_args(app, &argv) {
+                return;
+            }
+            // This app started again by hand: its window — shown, if a pinned
+            // app started this run without it (apps/pin.rs).
+            apps::pin::show_main(app);
+        }));
+    }
+
+    builder
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_os::init())
+        // Every step of a launch is written to disk — see diag.rs for why the
+        // plugin's defaults (40 KB, keep one, no adb/scrcpy detail) left a
+        // failed connection with nothing to look at.
+        .plugin(diag::log_plugin())
+        .manage(scrcpy::MirrorState::default())
+        .invoke_handler(tauri::generate_handler![
+            adb::adb_version,
+            adb::adb_devices,
+            adb::adb_list_devices,
+            adb::adb_list_apps,
+            adb::adb_launch_on_display,
+            adb::adb_prepare_desktop,
+            adb::adb_end_desktop,
+            adb::adb_reboot,
+            adb::adb_connect,
+            adb::adb_start_launcher,
+            // The way back out of a fullscreen window on a phone that cannot
+            // draw a titlebar to close it with.
+            wm::desktop_home,
+            wm::desktop_close_top,
+            wireless::wireless_support,
+            wireless::wireless_go_wireless,
+            wireless::wireless_discover,
+            wireless::wireless_pair,
+            wireless::wireless_qr_begin,
+            wireless::wireless_qr_poll,
+            wireless::wireless_qr_cancel,
+            wireless::wireless_known,
+            wireless::wireless_forget,
+            wireless::wireless_reconnect_known,
+            wireless::wireless_disconnect,
+            projection::projection_support,
+            projection::projection_open_settings,
+            projection::projection_install_receiver,
+            projection::projection_install_command,
+            scrcpy::start_mirror,
+            scrcpy::stop_mirror,
+            scrcpy::focus_session,
+            scrcpy::list_mirror_sessions,
+            embed::embed_session,
+            embed::move_session,
+            embed::set_session_visible,
+            embed::raise_session,
+            diag::diag_collect,
+            diag::diag_log_path,
+            diag::diag_reveal,
+            remote::remote_phones,
+            remote::remote_pair_code,
+            remote::remote_pair_usb,
+            remote::remote_usb_status,
+            remote::remote_forget,
+            remote::remote_probe,
+            remote::remote_open_terminal,
+            remote::remote_open_vscode,
+            remote_desktop::remote_open_desktop,
+            remote_desktop::remote_desktop_connect,
+            remote_desktop::remote_desktop_put,
+            remote_desktop::remote_desktop_put_cancel,
+            remote_desktop::remote_desktop_inbox,
+            remote_desktop::remote_desktop_stream,
+            remote_desktop::remote_desktop_reveal,
+            remote_usb::remote_desktop_usb,
+            apps::apps_prepare,
+            apps::apps_drop,
+            apps::apps_list,
+            apps::apps_open,
+            apps::apps_windows,
+            apps::apps_close,
+            apps::apps_startup,
+            apps::apps_pending,
+            apps::apps_clipboard_files,
+            apps::apps_paste,
+            notifications::notifications_state,
+            notifications::notifications_apps,
+            notifications::notifications_set,
+            notifications::notifications_mute,
+            notifications::notifications_test,
+            notifications::notifications_fix,
+            notifications::notifications_counts,
+            quit::app_close_seen,
+            quit::app_close_answer
+        ])
+        .on_window_event(|window, event| match event {
+            // The main window's close is the app's: it asks first when that
+            // would end a desktop or a phone app's window (quit.rs).
+            tauri::WindowEvent::CloseRequested { api, .. } => quit::close_requested(window, api),
+            // A phone's desktop window takes its local port and its tunnel with it.
+            tauri::WindowEvent::Destroyed => remote_desktop::window_closed(window.label()),
+            _ => {}
+        })
+        .setup(|app| {
+            let argv: Vec<String> = std::env::args().collect();
+            // The window, made first and shown at once — unless a pinned phone
+            // app started this run: then that app's window is all there is to
+            // see, and this one waits until it is wanted (apps/pin.rs).
+            apps::pin::start(&app.handle().clone(), &argv)?;
+            diag::log_startup(&app.handle().clone());
+            // The desktop's window is opened at the exact size of its content,
+            // which on a Mac means knowing the title bar above it — and AppKit
+            // only answers that on this thread.
+            display::measure_window_frame();
+            // Each paired phone's ProxyCommand names this binary by path, and
+            // an update or a move changes that path. Rewritten on every start
+            // so `ssh <phone>` follows the app wherever it is.
+            remote::refresh_ssh_files();
+            // Before anything else touches the pad: if a previous run was
+            // killed mid-session it left the host's own touchpad gestures
+            // stood down, and this is the pass that gives them back.
+            gestures::restore_host_settings(&app.handle().clone());
+            // Started from a phone app pinned to the taskbar or the Dock: that app's window.
+            apps::open_at_startup(&app.handle().clone(), &argv);
+            // The phone's notifications as this computer's own, for every phone
+            // that is attached while they are on.
+            notifications::start(&app.handle().clone());
+            Ok(())
+        })
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| match event {
+            // A phone app kept in the Dock, clicked: the URL it hands this app (apps/pin.rs).
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Opened { urls } => apps::open_from_urls(app, urls.iter().map(|u| u.as_str())),
+            // This app's own Dock icon: its window, if a pinned app started this run without it.
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => apps::pin::reopened(app),
+            tauri::RunEvent::Exit => {
+                log::info!("── application exiting ──");
+                // Nothing ends the run a second time as its windows close below.
+                apps::pin::exiting();
+                // The phone's toasts first: nothing can act on them once this has gone.
+                notifications::stop();
+                // Every phone app's window closes first, each app back on its
+                // phone at once — before the seconds the desktop's undo takes.
+                apps::shutdown(app);
+                scrcpy::kill_all(app);
+                // The reader owns a host-wide subscription and, on Windows, a
+                // registry change: neither may outlive the process, and the
+                // session's stop flag alone would race us to the door.
+                gestures::stop_engine();
+                gestures::restore_host_settings(app);
+                // A keyboard hook must not outlive the process that owns its
+                // callback, and on macOS neither must an event tap.
+                hotkeys::stop_engine();
+                // A bound listener must not outlive the process either, and
+                // the per-session stop flag alone races us to the door: the
+                // accept thread only observes it once per 200ms poll.
+                files::shutdown_all();
+                // Each open desktop window holds the phone awake; say goodbye.
+                remote_desktop::close_all();
+            }
+            _ => {}
+        });
+}

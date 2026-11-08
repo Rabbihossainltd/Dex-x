@@ -1,0 +1,78 @@
+.gradle/
+# Gradle output: the root project's, and EVERY module's. The per-module lines
+# used to be spelled out one at a time, so adding :linuxapp dropped 484
+# intermediates into `git status` — a wildcard is what keeps the next module
+# from doing it again. Nothing in this repo is a tracked directory named build/
+# (openandroiddex-wmd/build.sh is a file, and the trailing slash matches only
+# directories), so the rule cannot swallow a source path.
+openandroiddex-launcher/build/
+openandroiddex-launcher/*/build/
+
+# Cargo output for the remote-access crate. Its Cargo.lock IS tracked — the
+# phone binary is built from it and committed to jniLibs, so the lockfile is
+# what makes that build repeatable. (The desktop app's own target/ is covered
+# by open-android-dex-tauri/.gitignore.)
+openandroiddex-remote/target/
+
+# IDE, per-machine
+.idea/
+.vscode/
+
+# macOS Finder metadata, written into every directory a Finder window opens.
+.DS_Store
+
+# Reverse-engineering scratch, local only. jadx/apktool output from a third-party
+# closed-source product, plus our written analysis of it, kept as reference for the
+# window-management and daemon work. It is someone else's compiled code decompiled
+# and notes about someone else's product — neither is committed or redistributed.
+# Nothing in this project is derived from it.
+doc/decompiled-commercial-dex/
+doc/decompiled-commercial-dex-v1.0/
+doc/commercial-android-dex-architecture.md
+
+# Android Studio writes this per machine and pins an absolute sdk.dir. It was
+# committed once with a Windows path in it, which broke `npm run apk` on every
+# other OS: Gradle prefers local.properties over ANDROID_HOME, so the build
+# went looking for a C:\ drive. Set ANDROID_HOME instead.
+local.properties
+
+# Local research scratch: AOSP sources (adb, wifi, init) and saved
+# android.googlesource.com pages kept while working out wireless ADB and the
+# uid-2000 daemon. Someone else's Apache-2.0 code, read-only reference, and
+# nothing in this project imports it — so it stays out of the repo.
+/ADM.java
+/AdbService.java
+/wsc.java
+/adb_mdns.h
+/adb_utils.cpp
+/commandline.cpp
+/transport.h
+/pm.cpp
+/ss.cpp
+/daemon_*.cpp
+/init.rc
+/adbd.rc
+/adbd.te
+/pc.txt
+/shellmanifest.xml
+/adbd.html
+/adbdir.html
+/apex.html
+/rd.html
+/root.html
+
+# One-off machine setup with a hardcoded per-user path; not portable.
+/_install_buildtools.cmd
+
+# Release signing keys. The one exception, openandroiddex-launcher/app/
+# debug.keystore, is the well-known public Android debug key and is already
+# tracked — a rule added after the fact does not untrack it. Everything else
+# matching these is a private key: the one that signs the Play uploads (see
+# openandroiddex-launcher/release-signing.gradle), which lives in a repository
+# secret and an offline backup, and must never reach a commit. Losing it means
+# Play's key-reset process; publishing it means anyone can ship an "update" to
+# both apps.
+*.jks
+*.keystore
+
+.hero-tmp/

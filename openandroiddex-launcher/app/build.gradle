@@ -1,0 +1,163 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.ccrstech.openandroiddex.launcher'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId "com.ccrstech.openandroiddex.launcher"
+        minSdk 26
+        targetSdk 35
+        // Rewritten by .github/workflows/desktop.yml on every release, from the
+        // single version that cut it: versionName is that string verbatim, and
+        // versionCode is MAJOR*10000 + MINOR*100 + PATCH (0.3.11 -> 311), which
+        // stays monotonic for any MINOR/PATCH under 100.
+        //
+        // Both used to be pinned here and never touched, so every launcher ever
+        // built — the first prototype and the current release alike — reported
+        // 0.2.0/2. A phone therefore could not say which launcher it had, and
+        // finding a stale one meant pulling base.apk off the device and reading
+        // its manifest. Keep these in step with open-android-dex-tauri/
+        // package.json when changing them by hand.
+        versionCode 332
+        versionName "0.3.32"
+
+        // armeabi-v7a is here for the desktop, not for Linux or Docker. Plenty
+        // of phones run 32-bit Android on a 64-bit chip (Galaxy A13, Redmi 9A,
+        // most Android Go builds), and an APK with native code for none of a
+        // phone's ABIs is refused outright — INSTALL_FAILED_NO_MATCHING_ABIS —
+        // which took the whole desktop away from phones the README promises
+        // ("Any Android 8.0 or newer"). The only armeabi-v7a library is
+        // WebRTC's, from the AAR below; the hand-shipped jniLibs (proot, QEMU)
+        // stay 64-bit only, and Linux.abiSupported / Docker.abiSupported keep
+        // those two features out of sight on a 32-bit install. A 64-bit phone
+        // still installs as arm64-v8a. x86 (32-bit) stays out: no phone worth
+        // the ~16 MB runs it.
+        // `-PdxxAbi=arm64-v8a` narrows the shipped ABIs to the ones named, for a
+        // sideload build that only ever meets one phone: the native code is
+        // ~12 MB per ABI, so a single-ABI APK is a little over half the size of
+        // the three-ABI one, which matters when the file comes down a slow link.
+        // Anything else keeps the full set above.
+        def onlyAbi = project.findProperty('dxxAbi')
+        ndk {
+            abiFilters(*(onlyAbi ? onlyAbi.split(',')*.trim() : ['arm64-v8a', 'armeabi-v7a', 'x86_64']))
+        }
+    }
+
+    // The debug key is checked in on purpose. Left to itself, the Android
+    // Gradle Plugin signs debug builds with ~/.android/debug.keystore, which it
+    // generates on demand *per machine* — so every developer and every
+    // (ephemeral) CI runner produces a differently-signed launcher. Android
+    // only accepts an update signed with the same key as the installed copy, so
+    // any phone that already had the launcher rejected the next build with
+    // INSTALL_FAILED_UPDATE_INCOMPATIBLE and the desktop never came up. Pinning
+    // the key here makes every build — local or CI — an installable update of
+    // every other one.
+    //
+    // These are the well-known Android debug credentials, public by design and
+    // identical on every Android developer's machine. This is not a release key
+    // and must never become one: Play rejects debug-signed APKs outright. The
+    // release key lives outside the repository and is wired in by
+    // release-signing.gradle, applied at the bottom of this file.
+    signingConfigs {
+        debug {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+
+            // assembleDebug is what the desktop app ships and pushes over
+            // adb, so a debuggable APK would put a debug build in every user's
+            // hands.
+            // Android then shows the "Android App Compatibility" dialog on
+            // launch — it fires only for debuggable apps — complaining that the
+            // proot jniLibs are not 16 KB page aligned (they are prebuilts
+            // linked with the 4 KB default; libloader32.so is additionally an
+            // ELF32 sitting in an arm64-v8a dir, which the checker reports as
+            // "Unknown error"). Turning debuggable off removes the dialog and
+            // the "debuggable app" security nag with it.
+            //
+            // Cost: `adb shell run-as` stops working, so CaptionService's
+            // files/caption.log breadcrumb is unreadable. Build with
+            // `-PdebuggableLauncher` when you need it back.
+            debuggable project.hasProperty('debuggableLauncher')
+        }
+        release {
+            minifyEnabled false
+
+            // signingConfig is set by release-signing.gradle at the bottom of
+            // this file, from a key that is NOT in the repository. This build
+            // type is what goes to Play and what a person downloads from the
+            // releases page for a phone that has no PC behind it; the debug
+            // build above is what the desktop app pushes over adb. They are two
+            // distribution channels, and Play will not take the debug one.
+            //
+            // ONE PHONE CANNOT HOLD BOTH. Same applicationId, two keys, so
+            // Android refuses to update across them: a phone with the Play
+            // build on it makes the desktop app's `install -r` fail with
+            // INSTALL_FAILED_UPDATE_INCOMPATIBLE, and adb.rs answers that by
+            // uninstalling the Play copy — settings and all — to put the
+            // bundled one in its place. Unifying the two channels means
+            // signing the desktop payload with this key too, which is a
+            // one-time break for every phone that already has the debug-signed
+            // launcher, so it is a decision and not a tidy-up.
+            //
+            // minifyEnabled stays false. The launcher reflects into hidden
+            // framework classes and names components by string from the wmd
+            // daemon's wire protocol, so R8 would have to be taught every one
+            // of those by hand — for an APK whose size is dominated by
+            // prebuilt native code R8 cannot touch anyway.
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // The Linux feature ships proot (+ its two loaders) as jniLibs. proot must
+    // be a REAL FILE in the app's nativeLibraryDir so it can be exec'd (the one
+    // place an app targeting SDK 35 may keep an executable — W^X-exempt) and so
+    // its loaders resolve by absolute path. Legacy packaging extracts the .so
+    // files at install instead of running them mapped from the APK; without it
+    // nativeLibraryDir is empty and proot cannot launch. Pairs with
+    // android:extractNativeLibs="true" in the manifest.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+}
+
+// The ONLY third-party dependency in this APK, and it is here because the
+// alternative is writing ICE, DTLS-SRTP and SCTP by hand. Everything else in
+// the launcher is platform API on purpose; WebRTC is the one problem the
+// platform does not solve and nobody should solve twice.
+//
+// webrtc-sdk's build rather than the abandoned org.webrtc:google-webrtc: that
+// one stopped at M92 in 2021 and does not build against a modern NDK. The
+// unprefixed artifact keeps the `org.webrtc` package, which is what every
+// piece of WebRTC documentation is written against; `android-prefixed` exists
+// to avoid clashing with another WebRTC in the same process, and there is no
+// other one here.
+//
+// Size: ~12 MB of native code per ABI, which the abiFilters above hold to the
+// three this APK ships. That is the price of reaching a phone that has no
+// inbound route at all — see doc/web-viewer.md.
+dependencies {
+    implementation 'io.github.webrtc-sdk:android:144.7559.12'
+}
+
+// Turns `release` above into a signable build type when the release key is in
+// the environment, and fails assembleRelease/bundleRelease with a message that
+// names the missing variable when it is not. Debug builds never touch it.
+// Applied last, because it configures the android {} extension above.
+apply from: rootProject.file('release-signing.gradle')

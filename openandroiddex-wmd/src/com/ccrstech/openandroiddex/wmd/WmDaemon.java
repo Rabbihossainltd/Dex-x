@@ -1,0 +1,1523 @@
+package com.ccrstech.openandroiddex.wmd;
+
+import android.graphics.Rect;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.util.List;
+
+/**
+ * The privileged half of the desktop, as a resident socket server.
+ *
+ * The launcher runs at uid 10534 and can never hold MANAGE_ACTIVITY_TASKS. This process
+ * runs at uid 2000 and does. It holds no policy and draws nothing of its own — it is a
+ * mechanism the launcher drives. (The one picture it shows is the launcher's: the phone
+ * touchpad's arrow, where no window of the launcher's will do — see PadPointer.)
+ *
+ * Transport is loopback TCP rather than a LocalSocket because SELinux policy between
+ * untrusted_app and a shell-domain abstract socket is not dependable, whereas
+ * app -> 127.0.0.1 is. The cost is that the launcher must declare INTERNET.
+ *
+ * Loopback TCP takes anyone on the phone, so each connection is put to the kernel
+ * first (Peers): the shell uid — the PC's `adb forward`, or adb shell itself — and root
+ * may use every verb, the launcher every verb but the PC's own three (PC_ONLY), and any
+ * other app is answered "ERR not allowed" and hung up on.
+ *
+ * Line-oriented ASCII so it can be driven by hand with `nc` during diagnosis:
+ *
+ *   PING                                      -> OK <uid>
+ *   LIST <display>                            -> TASK <ix> <id> … (topmost first) / END
+ *   STRIP <display> <task> <px>               -> OK          reserve a caption inset
+ *   UNSTRIP <display> <task>                  -> OK          release it
+ *   MOVE <display> <task> <x> <y>             -> OK <l> <t> <r> <b>
+ *   BOUNDS <display> <task> <l> <t> <r> <b>   -> OK          instant, per-frame drag
+ *   RESIZE <display> <task> <l> <t> <r> <b> <px> -> OK       animated one-shot + re-strip
+ *   FRONT <display> <task>                    -> OK
+ *   FOCUSABLE <display> <task> <0|1>          -> OK
+ *   ALWAYSONTOP <display> <task> <0|1>        -> OK
+ *   CLOSE <task>                              -> OK
+ *   SCREEN [0|1]                              -> OK [<0|1>]  the phone's own panel
+ *   CPUSTAT                                   -> OK <busy> <total>  processor jiffies
+ *   PROCS <pkg…>                              -> TOTAL <busy> <total> /
+ *                                                PROC <pkg> <rssKb> <jiffies> … / END
+ *   MOVEDISPLAY <task> <display>              -> OK          take a claimed window back
+ *   AUDIOROUTE SET <type> <address|->         -> OK          pin media to a phone output
+ *   AUDIOROUTE CLEAR                          -> OK          back to the phone's own policy
+ *   ARM <ttlSeconds> <settings chain…>        -> OK          refresh the dead-man switch
+ *   ARMED                                     -> OK <ttlSeconds> <settings chain…> / NONE
+ *   REQPUT <id> <cmd> <arg…>                  -> OK          launcher raises a PC request
+ *   REQGET                                    -> REQ <id> <cmd> <arg…> … / END
+ *   REQACK <id>                               -> OK          drop rows with id <= N
+ *   MOUSE <display> <x> <y> <buttons>         -> OK          the phone touchpad's pointer
+ *   WHEEL <display> <x> <y> <h> <v>           -> OK          …its wheel, in notches
+ *   LEAVE <display>                           -> OK          …gone: let go, stop hovering
+ *   CURSOR <display> <x> <y> <hx> <hy> <png>  -> OK          …drawn here (base64 PNG, hot spot)
+ *   CURSOR <display> -                        -> OK          …and no longer
+ *   KEY <display> <keycode>                   -> OK          one key, to what has the keyboard
+ *   FOCUS <display>                           -> OK [<task>] the keyboard back to <display>
+ *   TOP <display>                             -> OK <task> <pkg> | OK -1 -   what is in front
+ *   BYE                                       -> (closes)
+ *   ERR <reason>                              on any failure
+ *
+ * MOVE uses applyTransaction, not a transition: measured 2.49 ms on SM-S938B, and
+ * critically it does not enter the transition queue, so it can be issued per drag frame.
+ * See doc/custom-titlebar-v2.md §0.
+ */
+public final class WmDaemon {
+
+    static final int PORT = 7191;
+
+    static final String LAUNCHER = "com.ccrstech.openandroiddex.launcher";
+    static final String CAPTION_SERVICE = LAUNCHER + "/" + LAUNCHER + ".CaptionService";
+
+    /**
+     * How long RECLAIM waits for an activity that is still starting.
+     *
+     * Under the launcher's WmClient.READ_TIMEOUT_MS (1500) on purpose. When there is
+     * nothing to take back — the usual answer: the app opened where it was asked to —
+     * the whole wait runs out, and a reply that lands after the client has hung up
+     * makes it send the request again and wait all over.
+     */
+    static final long RECLAIM_WAIT_MS = 1200L;
+
+    /**
+     * Launcher -> PC requests, waiting for the PC to drain them.
+     *
+     * The launcher cannot close another app's task or flip a system toggle; the PC can,
+     * over adb. That channel used to be a ContentProvider the PC read with
+     * `content query`, which costs a whole app_process VM per read — measured at 537 ms
+     * on a Redmi Note 7 against 73 ms for a bare adb shell round trip. Polling it at
+     * 150 ms meant booting a JVM roughly every 0.7 s for the entire session, which is
+     * most of what made an idle desktop warm, and it put 150 ms of poll wait plus 537 ms
+     * of query in front of every taskbar press.
+     *
+     * Same rows, same ack discipline, over the socket that is already open. See
+     * RequestProvider, which still carries the payload when this daemon is not up.
+     *
+     * Bounded because the PC can go away (cable out, app killed) while the launcher keeps
+     * queueing: past the cap the OLDEST row is dropped, so a stale backlog can never
+     * stop the newest press from being seen.
+     */
+    private static final java.util.ArrayDeque<String[]> REQUESTS = new java.util.ArrayDeque<>();
+    private static final int REQUESTS_MAX = 256;
+
+    /** A component name and nothing else: the LAUNCH verb's only input check. */
+    static final java.util.regex.Pattern COMPONENT =
+            java.util.regex.Pattern.compile("[A-Za-z0-9_.$]+/[A-Za-z0-9_.$]+");
+
+    public static void main(String[] args) {
+        int port = args.length > 0 ? Integer.parseInt(args[0]) : PORT;
+        try {
+            ServerSocket server = new ServerSocket(port, 8, InetAddress.getByName("127.0.0.1"));
+            System.out.println("wmd listening on 127.0.0.1:" + port + " uid=" + Wm.uid());
+            System.out.flush();
+            Thread watchdog = new Thread(WmDaemon::watchdog, "wmd-watchdog");
+            watchdog.setDaemon(true);
+            watchdog.start();
+            while (true) {
+                Socket client = server.accept();
+                client.setTcpNoDelay(true);   // a drag is many tiny writes; Nagle would batch them
+                new Thread(() -> serve(client), "wmd-client").start();
+            }
+        } catch (Throwable t) {
+            System.out.println("FATAL " + t);
+            t.printStackTrace(System.out);
+            System.exit(1);
+        }
+    }
+
+    private static void serve(Socket socket) {
+        try (Socket s = socket;
+             BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream()));
+             PrintWriter out = new PrintWriter(s.getOutputStream(), true)) {
+            Caller caller = callerOf(s);
+            if (caller == null) {
+                out.println("ERR not allowed");
+                return;
+            }
+            String line;
+            while ((line = in.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty()) continue;
+                if ("BYE".equalsIgnoreCase(line)) return;
+                try {
+                    handle(line.split("\\s+"), out, caller, socket);
+                } catch (Throwable t) {
+                    out.println("ERR " + t.getMessage());
+                }
+            }
+        } catch (IOException ignored) {
+            // client went away mid-command; per-connection state dies with it
+        } finally {
+            PadPointer.dropOwnedBy(socket);
+        }
+    }
+
+    // ── who may connect ─────────────────────────────────────────────────────
+
+    /** What a connection may do. A caller that is neither is refused outright. */
+    private enum Caller {
+        /** uid 2000 or 0: the PC through `adb forward`, or adb shell itself. Everything. */
+        PC,
+        /** The launcher app, in any of its processes, Linux included. All but PC_ONLY. */
+        LAUNCHER
+    }
+
+    /**
+     * Verbs only the PC sends, closed to the launcher's uid as well as to strangers.
+     *
+     * ARM is the reason. Its argument is a shell command this process runs as uid 2000
+     * once the PC has gone quiet; the launcher only ever READS it (ARMED), and its uid
+     * is shared with the Linux guest, where any program the user installs runs. REQGET
+     * and REQACK drain the launcher's own requests to the PC, so the launcher has no use
+     * for them, and a guest that could ack would make taskbar presses vanish.
+     */
+    private static final java.util.Set<String> PC_ONLY =
+            new java.util.HashSet<>(java.util.Arrays.asList("ARM", "REQGET", "REQACK"));
+
+    /** The launcher's app id, once looked up; -1 before that. See isLauncher. */
+    private static volatile int launcherAppId = -1;
+    private static long launcherLookedUpAt = 0L;
+
+    /**
+     * Least time between two lookups of the launcher's uid. A reinstall gives it a new
+     * one — the PC uninstalls and reinstalls when the signature differs, with this
+     * process still running — so an unknown app uid asks again; but every such
+     * connection forks `cmd`, and an app knocking in a loop must not turn that into a
+     * fork loop.
+     */
+    private static final long LAUNCHER_LOOKUP_GAP_MS = 2000L;
+
+    private static volatile boolean unreadableSaid = false;
+    private static final java.util.Map<Integer, Long> refusalSaid = new java.util.HashMap<>();
+
+    private static Caller callerOf(Socket s) {
+        int uid = Peers.uidOf(s.getPort(), s.getLocalPort());
+        if (uid == Peers.UNREADABLE) {
+            // No phone measured so far denies shell these tables. One that did would
+            // have the daemon as open as it always was, rather than a desktop with no
+            // window chrome at all, and the log says which it is.
+            if (!unreadableSaid) {
+                unreadableSaid = true;
+                log("peers: /proc/net/tcp cannot be read — every caller is let in, as before");
+            }
+            return Caller.PC;
+        }
+        if (uid == Peers.ROOT_UID || uid == Peers.SHELL_UID) return Caller.PC;
+        if (uid >= 0 && isLauncher(uid)) return Caller.LAUNCHER;
+        synchronized (refusalSaid) {
+            long now = System.currentTimeMillis();
+            Long last = refusalSaid.get(uid);
+            if (last == null || now - last > 10_000L) {
+                refusalSaid.put(uid, now);
+                log("peers: refused " + (uid == Peers.UNKNOWN
+                        ? "a caller with no live socket (port " + s.getPort() + ")"
+                        : "uid " + uid));
+            }
+        }
+        return null;
+    }
+
+    private static boolean isLauncher(int uid) {
+        if (Peers.sameApp(uid, launcherAppId)) return true;
+        if (uid % Peers.PER_USER_RANGE < Peers.FIRST_APPLICATION_UID) return false;
+        synchronized (WmDaemon.class) {
+            long now = System.currentTimeMillis();
+            if (launcherAppId < 0 || now - launcherLookedUpAt >= LAUNCHER_LOOKUP_GAP_MS) {
+                launcherLookedUpAt = now;
+                int id = Peers.appIdFromList(
+                        sh("cmd package list packages -U --user 0 " + LAUNCHER), LAUNCHER);
+                if (id < 0) id = Peers.appIdFromDump(sh("dumpsys package " + LAUNCHER));
+                if (id != launcherAppId) log("peers: the launcher is app id " + id);
+                launcherAppId = id;
+            }
+        }
+        return Peers.sameApp(uid, launcherAppId);
+    }
+
+    /** {@code conn}: the connection the line came on, for what lasts only as long as it. */
+    private static void handle(String[] a, PrintWriter out, Caller caller, Socket conn) {
+        String verb = a[0].toUpperCase();
+        if (caller != Caller.PC && PC_ONLY.contains(verb)) {
+            out.println("ERR not allowed: " + verb);
+            return;
+        }
+        switch (verb) {
+            case "PING":
+                out.println("OK " + Wm.uid());
+                return;
+
+            case "DESKTOP": {
+                // Which display is the desktop? Answered from the task tree, not from
+                // accessibility: dead scrcpy sessions leave their virtual displays
+                // behind, and only the live one is running our launcher.
+                out.println("OK " + Wm.displayHosting(a.length > 1 ? a[1] : LAUNCHER));
+                return;
+            }
+
+            case "LAUNCH": {
+                // "LAUNCH <displayId> <pkg/cls>" — put an activity on a display the
+                // launcher itself is not allowed to put one on.
+                //
+                // An UNTRUSTED virtual display refuses a launch from an app uid:
+                // ActivityTaskManager logs "Permission Denial: … with launchDisplayId=N"
+                // and the tap dies there, whatever the ActivityOptions say. Only a
+                // system-level caller may do it, which is exactly what this process is.
+                // Every virtual display before Android 11 is untrusted — there was no
+                // such thing as a trusted one — and a manufacturer may withhold it
+                // after. On a phone whose display IS trusted the launcher never asks.
+                //
+                // `am` rather than a reflected startActivityAsUser: that signature
+                // gained and lost parameters across the releases this daemon runs on,
+                // and the cost of a fork — once, on a click a human made and is already
+                // waiting on — buys immunity from all of it. Nothing else in here can
+                // afford this and nothing else does it.
+                int display = i(a, 1);
+                String comp = a.length > 2 ? a[2] : "";
+                // The launcher's uid is also the Linux guest's, where anything the user
+                // installs runs, so the component is held to the character set of a real
+                // one before it goes near a shell. No quote can get through, so the
+                // quoting below cannot be escaped out of.
+                if (!COMPONENT.matcher(comp).matches()) {
+                    out.println("ERR not a component: " + comp);
+                    return;
+                }
+                String reply = sh("am start --display " + display + " -n '" + comp + "'");
+                // `am` reports a refusal on stdout and still exits 0, so the text is the
+                // only answer there is.
+                boolean failed = reply.contains("Error") || reply.contains("Exception");
+                out.println(failed ? "ERR " + reply.replace('\n', ' ') : "OK");
+                return;
+            }
+
+            case "HOME": {
+                // "HOME [displayId]" — raise the desktop's own launcher over whatever is
+                // covering it. THE WAY OUT, and the reason it exists twice:
+                //
+                // FRONT is the right verb and cannot be used on an old phone. It reorders
+                // through getAllRootTaskInfosOnDisplay (Android 12) and a
+                // WindowContainerTransaction (Android 11), neither of which exists on 10 —
+                // and 10 is exactly where this matters, because a phone that cannot make a
+                // trusted display gets no freeform, so every app opens fullscreen over the
+                // launcher and takes the taskbar with it. There is then nothing left on
+                // screen to press.
+                //
+                // `am start` on the launcher does the same job with an API that has been
+                // there since the beginning. It is a no-op on a launcher already in front.
+                int d = a.length > 1 ? i(a, 1) : displayFromDump(LAUNCHER);
+                if (d < 0) {
+                    out.println("ERR no desktop display");
+                    return;
+                }
+                String r = sh("am start --display " + d
+                        + " -n " + LAUNCHER + "/" + LAUNCHER + ".LauncherActivity");
+                out.println(r.contains("Error") || r.contains("Exception")
+                        ? "ERR " + r.replace('\n', ' ') : "OK " + d);
+                return;
+            }
+
+            case "CLOSETOP": {
+                // "CLOSETOP [displayId]" — close the front-most app window, launcher
+                // excepted: it is the desktop itself, and removing it leaves a black
+                // display with no way to bring anything back.
+                //
+                // removeTask is old enough to work everywhere (verified answering OK on
+                // Android 10); only FINDING the task needed the 12+ API, and the dump
+                // gives the same answer on every version.
+                int d = a.length > 1 ? i(a, 1) : displayFromDump(LAUNCHER);
+                if (d < 0) {
+                    out.println("ERR no desktop display");
+                    return;
+                }
+                int task = topTaskFromDump(sh("dumpsys activity activities"), d, LAUNCHER);
+                if (task < 0) {
+                    out.println("OK none");     // an empty desktop is not a failure
+                    return;
+                }
+                Wm.removeTask(task);
+                out.println("OK " + task);
+                return;
+            }
+
+            case "RECLAIM": {
+                // "RECLAIM <displayId> <pkg/cls>" — take a window the phone kept and put
+                // it on the desktop.
+                //
+                // Our own screens cannot be started onto an untrusted display by anyone.
+                // The launcher may not name the display (an app uid is refused), and
+                // unnamed the platform puts the activity on the DEFAULT display instead
+                // of the caller's. This process may not start them either — they are not
+                // exported, and "not exported from uid 10225" applies to uid 2000 like
+                // anyone else.
+                //
+                // So the activity is allowed to open wherever it lands, and then MOVED,
+                // which needs only MANAGE_ACTIVITY_TASKS and no cooperation from the
+                // activity at all. It is the same reclaim the PC already does for windows
+                // the phone steals back mid-session.
+                //
+                // POLLED, because the caller asks the instant it starts the activity and
+                // the task does not exist yet — a few hundred milliseconds of nothing is
+                // the normal case, not a failure.
+                int want = i(a, 1);
+                String comp = a.length > 2 ? a[2] : "";
+                if (want < 0 || !COMPONENT.matcher(comp).matches()) {
+                    out.println("ERR bad arguments");
+                    return;
+                }
+                long deadline = System.currentTimeMillis() + RECLAIM_WAIT_MS;
+                int[] found = null;
+                while (found == null && System.currentTimeMillis() < deadline) {
+                    found = strayTask(sh("dumpsys activity activities"), comp, want);
+                    if (found == null) sleep(120);
+                }
+                if (found == null) {
+                    out.println("OK none");     // never appeared, or already where it belongs
+                    return;
+                }
+                // moveStackToDisplay (below Android 12) wants the STACK, its replacement
+                // wants the task. On the releases where they overlap the two ids are the
+                // same number; where they are not, this is the difference between moving
+                // the window and moving nothing.
+                Wm.moveTaskToDisplay(Wm.hasRootTaskMove() ? found[0] : found[1], want);
+                out.println("OK " + found[0]);
+                return;
+            }
+
+            case "KEYBACK": {
+                // "KEYBACK <displayId>" — the Back KEY (the verb BACK is taken: it sends a
+                // task behind the others). Aimed at a display rather than at, aimed at a display rather than at
+                // whatever the phone thinks is focused.
+                //
+                // An app cannot do this: INJECT_EVENTS is a system permission and the
+                // launcher does not have it. This process does, which is the only reason
+                // the desktop's own Back button can exist at all.
+                int d = i(a, 1);
+                if (d < 0) {
+                    out.println("ERR no display");
+                    return;
+                }
+                String r = sh("input -d " + d + " keyevent 4 2>&1");
+                out.println(r.contains("Exception") ? "ERR " + r.replace('\n', ' ') : "OK");
+                return;
+            }
+
+            case "REQPUT": {
+                // "REQPUT <id> <cmd> <arg…>". The id is the LAUNCHER'S, not ours, and
+                // that is the whole point: the same request is also queued in
+                // RequestProvider, so the PC sees each press on both channels and its
+                // existing "skip anything at or below the watermark" rule is what stops
+                // it running twice. Two id spaces here would mean every taskbar press
+                // executing twice — once per channel.
+                //
+                // The arg is the rest of the line, spaces and all (a package name never
+                // has one, a config value can), so it is re-joined rather than read as a
+                // single token. Same reason as ARM.
+                if (a.length < 3) {
+                    out.println("ERR no command");
+                    return;
+                }
+                StringBuilder arg = new StringBuilder();
+                for (int i = 3; i < a.length; i++) {
+                    if (arg.length() > 0) arg.append(' ');
+                    arg.append(a[i]);
+                }
+                try {
+                    Long.parseLong(a[1]);
+                } catch (Exception e) {
+                    out.println("ERR bad id");
+                    return;
+                }
+                synchronized (REQUESTS) {
+                    REQUESTS.add(new String[]{a[1], a[2], arg.toString()});
+                    while (REQUESTS.size() > REQUESTS_MAX) REQUESTS.poll();
+                }
+                out.println("OK");
+                return;
+            }
+
+            case "REQGET": {
+                // Read WITHOUT clearing, exactly as the v2 ContentProvider does: the PC
+                // acks only once a request has actually been executed, so a PC that dies
+                // between reading and acting delays the press by one poll instead of
+                // eating it.
+                synchronized (REQUESTS) {
+                    for (String[] r : REQUESTS) {
+                        out.println("REQ " + r[0] + " " + r[1] + " " + r[2]);
+                    }
+                }
+                out.println("END");
+                return;
+            }
+
+            case "REQACK": {
+                long upto;
+                try {
+                    upto = Long.parseLong(a[1]);
+                } catch (Exception e) {
+                    out.println("ERR bad id");
+                    return;
+                }
+                synchronized (REQUESTS) {
+                    for (java.util.Iterator<String[]> it = REQUESTS.iterator(); it.hasNext(); ) {
+                        if (Long.parseLong(it.next()[0]) <= upto) it.remove();
+                    }
+                }
+                out.println("OK");
+                return;
+            }
+
+            case "ARM": {
+                // "ARM <ttlSeconds> <settings chain…>". The rest of the line is a shell
+                // command, spaces and all, so it is re-joined rather than read as one arg.
+                //
+                // This doubles as the heartbeat: the PC re-sends it every few seconds, and
+                // it is the ONLY thing that refreshes the timer. The launcher talks to this
+                // socket too, and treating its traffic as proof of life would keep the
+                // switch armed forever after the cable was pulled.
+                ttlMs = Long.parseLong(a[1]) * 1000L;
+                StringBuilder sb = new StringBuilder();
+                for (int ix = 2; ix < a.length; ix++) {
+                    if (sb.length() > 0) sb.append(' ');
+                    sb.append(a[ix]);
+                }
+                undoGlobals = sb.toString();
+                lastArmMs = System.currentTimeMillis();
+                out.println("OK");
+                return;
+            }
+
+            case "ARMED": {
+                // The launcher's copy of the switch. adbd takes this process down
+                // with it whenever it restarts — on the S25 Ultra, three seconds
+                // after every unplug — and the launcher, an app process, outlives
+                // that and does the settings half of the undo itself (see
+                // CaptionService's unplug watch). Reading it is not proof of life.
+                String g = undoGlobals;
+                out.println(g == null ? "NONE" : "OK " + (ttlMs / 1000L) + " " + g);
+                return;
+            }
+
+            case "LIST": {
+                List<Wm.TaskRec> tasks = Wm.tasksOnDisplay(i(a, 1));
+                for (int ix = 0; ix < tasks.size(); ix++) out.println(tasks.get(ix).line(ix));
+                out.println("END");
+                return;
+            }
+
+            case "STRIP": {
+                Wm.TaskRec t = Wm.taskById(i(a, 1), i(a, 2));
+                int px = i(a, 3);
+                Rect caption = new Rect(t.bounds.left, t.bounds.top, t.bounds.right,
+                        t.bounds.top + px);
+                Rect app = new Rect(t.bounds);
+                app.top += px;
+                Object wct = Wm.newTransaction();
+                Wm.setAppBounds(wct, t.token, app);
+                // Publishing a captionBar inset source is what makes One UI's
+                // DesktopModeWindowDecoration draw ITS caption into the strip — inside the
+                // task's Decor container at z=30000, which is above the app window and
+                // therefore above ours. Reserving the space via app bounds alone gets the
+                // layout we want without waking the platform's decoration.
+                // Pass "inset" as a 5th arg to opt back in for comparison.
+                if (a.length > 4 && "inset".equals(a[4])) {
+                    Wm.addCaptionInset(wct, t.token, caption);
+                }
+                Wm.applyTransaction(wct);
+                out.println("OK " + caption.left + " " + caption.top + " "
+                        + caption.right + " " + caption.bottom);
+                return;
+            }
+
+            case "UNSTRIP": {
+                Wm.TaskRec t = Wm.taskById(i(a, 1), i(a, 2));
+                Object wct = Wm.newTransaction();
+                // The app-bounds override outlives the inset source, so clear it
+                // explicitly — owner-binder death alone does not restore it.
+                Wm.setAppBounds(wct, t.token, new Rect(t.bounds));
+                Wm.removeCaptionInset(wct, t.token);
+                Wm.applyTransaction(wct);
+                out.println("OK");
+                return;
+            }
+
+            case "MOVE": {
+                Wm.TaskRec t = Wm.taskById(i(a, 1), i(a, 2));
+                Rect want = new Rect(t.bounds);
+                want.offsetTo(i(a, 3), i(a, 4));
+                Object wct = Wm.newTransaction();
+                Wm.setBounds(wct, t.token, want);
+                Wm.applyTransaction(wct);
+                out.println("OK " + want.left + " " + want.top + " " + want.right + " " + want.bottom);
+                return;
+            }
+
+            case "BOUNDS": {
+                Wm.TaskRec t = Wm.taskById(i(a, 1), i(a, 2));
+                Rect want = new Rect(i(a, 3), i(a, 4), i(a, 5), i(a, 6));
+                if (want.isEmpty()) {
+                    // A cleared/empty bounds makes matchParentBounds() true, which drives
+                    // every task below to VISIBLE_BEHIND_TRANSLUCENT or INVISIBLE — i.e.
+                    // pauses or stops every other app on the display. Never allow it.
+                    out.println("ERR empty bounds rejected");
+                    return;
+                }
+                Object wct = Wm.newTransaction();
+                Wm.setBounds(wct, t.token, want);
+                Wm.applyTransaction(wct);
+                out.println("OK");
+                return;
+            }
+
+            case "RESIZE": {
+                // One-shot geometry: maximise / restore / snap. Two things make the plain
+                // BOUNDS path flicker for these, and this case fixes both:
+                //
+                //  1. It sets the task bounds AND re-insets the caption strip (app bounds) in
+                //     ONE transaction, so the app never relayouts twice — BOUNDS then a
+                //     separate STRIP a reconcile pass later is what leaves the content jumping
+                //     under a momentarily-stale strip.
+                //  2. It moves the pixels through a transition, so the platform animates the
+                //     resize, instead of applyTransaction's unanimated jump. (applyTransaction
+                //     stays the right tool for per-frame drag, where a transition cannot be
+                //     issued every frame — see MOVE.)
+                Wm.TaskRec t = Wm.taskById(i(a, 1), i(a, 2));
+                Rect want = new Rect(i(a, 3), i(a, 4), i(a, 5), i(a, 6));
+                if (want.isEmpty()) {
+                    out.println("ERR empty bounds rejected");
+                    return;
+                }
+                int px = a.length > 7 ? i(a, 7) : 0;
+                Rect app = new Rect(want);
+                if (px > 0) app.top += px;
+                Object wct = Wm.newTransaction();
+                Wm.setBounds(wct, t.token, want);
+                Wm.setAppBounds(wct, t.token, app);
+                Wm.transition(wct);
+                out.println("OK");
+                return;
+            }
+
+            case "FRONT": {
+                int d = i(a, 1);
+                Wm.TaskRec t = Wm.taskById(d, i(a, 2));
+                Object wct = Wm.newTransaction();
+                Wm.reorder(wct, t.token, true);
+                Wm.transition(wct);   // a raise should animate
+                // Without a transition the raise may not have happened (Wm.transition).
+                boolean raised = Wm.hasStartNewTransition() || Wm.depth(d, t.taskId) == 0;
+                out.println(raised ? "OK" : "ERR not raised");
+                return;
+            }
+
+            case "BACK": {
+                // Just a restack. NOT a minimise: the fullscreen launcher occludes whatever
+                // lands at the bottom, so the window manager stops the task and it looks
+                // closed. Use HIDE for minimise.
+                int d = i(a, 1);
+                Wm.TaskRec t = Wm.taskById(d, i(a, 2));
+                int before = Wm.depth(d, t.taskId);
+                Object wct = Wm.newTransaction();
+                Wm.reorder(wct, t.token, false);
+                Wm.transition(wct);
+                // As FRONT: a restack that did not happen is said so.
+                boolean lowered = Wm.hasStartNewTransition()
+                        || Wm.depth(d, t.taskId) > before
+                        || before == Wm.tasksOnDisplay(d).size() - 1;
+                out.println(lowered ? "OK" : "ERR not lowered");
+                return;
+            }
+
+            case "HIDE": {
+                Wm.TaskRec t = Wm.taskById(i(a, 1), i(a, 2));
+                Object wct = Wm.newTransaction();
+                Wm.setHidden(wct, t.token, true);
+                Wm.transition(wct);   // minimising should animate
+                out.println("OK");
+                return;
+            }
+
+            case "SHOW": {
+                Wm.TaskRec t = Wm.taskById(i(a, 1), i(a, 2));
+                Object wct = Wm.newTransaction();
+                Wm.setHidden(wct, t.token, false);
+                Wm.reorder(wct, t.token, true);    // restore to the front, like a real WM
+                Wm.transition(wct);
+                out.println("OK");
+                return;
+            }
+
+            case "FOCUSABLE": {
+                Wm.TaskRec t = Wm.taskById(i(a, 1), i(a, 2));
+                Object wct = Wm.newTransaction();
+                Wm.setFocusable(wct, t.token, i(a, 3) != 0);
+                Wm.applyTransaction(wct);
+                out.println("OK");
+                return;
+            }
+
+            case "ALWAYSONTOP": {
+                Wm.TaskRec t = Wm.taskById(i(a, 1), i(a, 2));
+                Object wct = Wm.newTransaction();
+                Wm.setAlwaysOnTop(wct, t.token, i(a, 3) != 0);
+                Wm.applyTransaction(wct);
+                out.println("OK");
+                return;
+            }
+
+            case "CLOSE":
+                Wm.removeTask(i(a, 1));
+                out.println("OK");
+                return;
+
+            // The phone's own panel, which is not the desktop's display: the desktop
+            // has a power state of its own and keeps running while this is dark. No
+            // argument reads back what we last set, since nothing else reports it — the
+            // framework still believes a panel we blanked this way is lit.
+            case "SCREEN": {
+                if (a.length < 2) {
+                    out.println("OK " + (Screen.isOff() ? "0" : "1"));
+                    return;
+                }
+                Screen.power(!"0".equals(a[1]));
+                out.println("OK");
+                return;
+            }
+
+            // Raw processor jiffies for the taskbar's performance gauge, as
+            // "OK <busy> <total>". It lives here for one reason: /proc/stat is
+            // labelled proc_stat, which untrusted_app has not been allowed to
+            // read since Android 9, while this daemon runs as shell (uid 2000)
+            // and can. The arithmetic stays on the app side — a percentage is a
+            // difference between two readings, and the daemon is stateless.
+            case "CPUSTAT": {
+                long[] cpu = readCpuJiffies();
+                if (cpu == null) {
+                    out.println("ERR no-proc-stat");
+                    return;
+                }
+                out.println("OK " + cpu[0] + " " + cpu[1]);
+                return;
+            }
+
+            // "PROCS <pkg…>" -> TOTAL <busy> <total> / PROC <pkg> <rssKb> <jiffies> … / END
+            //
+            // Per-app cost, for the Task Manager's list. Only this side can
+            // answer it: an app has not been able to enumerate other processes
+            // since Android 8, while this daemon is shell (uid 2000), a member
+            // of the readproc group, and can read /proc/<pid> for anyone.
+            //
+            // Bounded by the caller's package list rather than dumping all
+            // ~1000 processes: the reply stays small and the scan does one
+            // cheap cmdline read per pid.
+            //
+            // MEASURED on SM-S938B as shell: cmdline, statm and stat all read
+            // fine; smaps_rollup does NOT (permission denied), so this reports
+            // RESIDENT memory and cannot report PSS. RSS counts shared pages —
+            // the zygote's, mostly — in full for every process, so these
+            // figures over-count and must never be presented as a share of
+            // system memory.
+            case "PROCS": {
+                long[] cpu = readCpuJiffies();
+                out.println("TOTAL " + (cpu == null ? "0 0" : cpu[0] + " " + cpu[1]));
+                java.util.Set<String> wanted = new java.util.HashSet<>();
+                for (int ix = 1; ix < a.length; ix++) wanted.add(a[ix]);
+                if (wanted.isEmpty()) {
+                    out.println("END");
+                    return;
+                }
+                java.util.Map<String, long[]> totals = new java.util.HashMap<>();
+                String[] pids = new java.io.File("/proc").list();
+                if (pids != null) {
+                    for (String pid : pids) {
+                        if (pid.isEmpty() || pid.charAt(0) < '0' || pid.charAt(0) > '9') continue;
+                        String pkg = processName(pid);
+                        // An app's extra processes are named "pkg:something";
+                        // they are the same app and their cost belongs to it.
+                        if (pkg == null) continue;
+                        int colon = pkg.indexOf(':');
+                        if (colon > 0) pkg = pkg.substring(0, colon);
+                        if (!wanted.contains(pkg)) continue;
+                        long[] acc = totals.get(pkg);
+                        if (acc == null) totals.put(pkg, acc = new long[2]);
+                        acc[0] += rssKb(pid);
+                        acc[1] += procJiffies(pid);
+                    }
+                }
+                for (java.util.Map.Entry<String, long[]> e : totals.entrySet()) {
+                    out.println("PROC " + e.getKey() + " " + e.getValue()[0]
+                            + " " + e.getValue()[1]);
+                }
+                out.println("END");
+                return;
+            }
+
+            // "AUDIOROUTE SET <type> <address|->" / "AUDIOROUTE CLEAR" — pin the
+            // phone's MEDIA to one of its own outputs, or hand the choice back.
+            // The one verb here that is not about windows: it lives on this
+            // socket because selecting a route is MODIFY_AUDIO_ROUTING, held by
+            // this uid and by no app. See Audio for the mechanism; any failure
+            // (an OEM that moved the API, a refused permission) comes back as
+            // ERR and the launcher opens the platform's own picker instead.
+            case "AUDIOROUTE": {
+                if (a.length < 2) {
+                    out.println("ERR audioroute needs SET or CLEAR");
+                    return;
+                }
+                switch (a[1].toUpperCase()) {
+                    case "SET":
+                        Audio.route(i(a, 2), a.length > 3 && !"-".equals(a[3]) ? a[3] : "");
+                        out.println("OK");
+                        return;
+                    case "CLEAR":
+                        Audio.clear();
+                        out.println("OK");
+                        return;
+                    default:
+                        out.println("ERR unknown audioroute " + a[1]);
+                        return;
+                }
+            }
+
+            case "MOVEDISPLAY": {
+                // Take a task back. Deliberately addressed by task id and NOT routed
+                // through taskById: the whole point is that the task is no longer on the
+                // display it belongs to, so a display-scoped lookup would fail.
+                //
+                // TRANSLATED FIRST on anything below Android 12, where the call behind
+                // this is moveStackToDisplay and wants the STACK. A task id handed to it
+                // is not rejected — it is a different window's stack, or nobody's, so the
+                // move silently does nothing or moves the wrong thing. Caught on a Redmi
+                // on Android 10, where "reclaim this window" moved the desktop's own
+                // launcher onto the phone.
+                int target = i(a, 1);
+                if (!Wm.hasRootTaskMove()) {
+                    int stack = stackForTask(target);
+                    if (stack >= 0) target = stack;
+                }
+                Wm.moveTaskToDisplay(target, i(a, 2));
+                out.println("OK");
+                return;
+            }
+
+            // ── the phone's own screen as the desktop's touchpad (doc/phone-touchpad.md) ──
+            //
+            // The launcher's touchpad turns fingers on the phone into a pointer and says
+            // where it is; these put it into the desktop as a mouse — hover, buttons, a
+            // wheel — through AppInput, the injector the computer's own app windows use. An
+            // app cannot do this: INJECT_EVENTS is this uid's, and never the launcher's.
+            //
+            // The launcher's uid is also the Linux guest's (see PC_ONLY), so for it each of
+            // these is held to the desktop's own display (padDisplay): never the phone's
+            // screen, where the lock screen and every permission dialog are.
+
+            case "MOUSE": {
+                // "MOUSE <display> <x> <y> <buttons>" — the pointer is here, with these
+                // MotionEvent.BUTTON_* held. None held is a hover.
+                int d = padDisplay(a, caller, out);
+                if (d < 0) return;
+                PadPointer.moveTo(d, i(a, 2), i(a, 3));
+                padInput(d).pointer(i(a, 2), i(a, 3), i(a, 4), 0);
+                out.println("OK");
+                return;
+            }
+
+            case "WHEEL": {
+                // "WHEEL <display> <x> <y> <h> <v>" — the wheel, in notches, which a
+                // touchpad sends in fractions. Up and right are positive.
+                int d = padDisplay(a, caller, out);
+                if (d < 0) return;
+                float h = f(a, 4);
+                float v = f(a, 5);
+                // Float.parseFloat takes "NaN" and "Infinity" too, and an app handed either
+                // as a scroll amount is anyone's guess.
+                if (!Float.isFinite(h) || !Float.isFinite(v)
+                        || Math.abs(h) > WHEEL_MAX || Math.abs(v) > WHEEL_MAX) {
+                    out.println("ERR no such scroll");
+                    return;
+                }
+                padInput(d).scroll(i(a, 2), i(a, 3), h, v, 0);
+                out.println("OK");
+                return;
+            }
+
+            case "LEAVE": {
+                // "LEAVE <display>" — the pointer has gone. A drag it was holding is let
+                // go, and what was under it stops showing itself hovered.
+                int d = padDisplay(a, caller, out);
+                if (d < 0) return;
+                AppInput in = padInput(d);
+                in.releaseAll();
+                in.left();
+                PadPointer.hide(d);
+                out.println("OK");
+                return;
+            }
+
+            case "CURSOR": {
+                // "CURSOR <display> <x> <y> <hotX> <hotY> <png>" — draw the pointer here: a
+                // base64 PNG, its hot spot, shown with that spot at x, y and moved by every
+                // MOUSE after. "CURSOR <display> -" takes it away. The launcher asks only
+                // where no window of its own will do (PadPointer), and what is drawn lasts
+                // only as long as the connection that asked.
+                int d = padDisplay(a, caller, out);
+                if (d < 0) return;
+                if (a.length == 3 && "-".equals(a[2])) {
+                    PadPointer.remove(d);
+                    out.println("OK");
+                    return;
+                }
+                if (a.length < 7 || a[6].length() > PadPointer.MAX_BASE64) {
+                    out.println("ERR no such pointer");
+                    return;
+                }
+                byte[] png = android.util.Base64.decode(a[6], android.util.Base64.DEFAULT);
+                PadPointer.set(conn, d, i(a, 2), i(a, 3), i(a, 4), i(a, 5), png);
+                out.println("OK");
+                return;
+            }
+
+            case "KEY": {
+                // "KEY <display> <keycode>" — one key, pressed and let go, for whatever has
+                // the keyboard there: the touchpad's Back. In-process, where
+                // KEYBACK forks `input` and waits for a VM to boot. The keyboard is handed
+                // to the display first, or the key would wait for a focused window that
+                // is not coming (see giveKeyboard).
+                int d = padDisplay(a, caller, out);
+                if (d < 0) return;
+                int code = i(a, 2);
+                if (code <= 0 || code > android.view.KeyEvent.getMaxKeyCode()) {
+                    out.println("ERR no such key " + code);
+                    return;
+                }
+                giveKeyboard(d);
+                padInput(d).tap(code);
+                out.println("OK");
+                return;
+            }
+
+            case "FOCUS": {
+                // "FOCUS <display>" — the keyboard back to <display>, when the phone's own
+                // screen has taken it. The touchpad asks as each touch begins, so that the
+                // computer's keyboard types where it was typing before the phone was
+                // picked up. Answers the task it focused, or plain OK when it had nothing
+                // to do — the usual case, and one binder call.
+                int d = padDisplay(a, caller, out);
+                if (d < 0) return;
+                int task = giveKeyboard(d);
+                out.println(task > 0 ? "OK " + task : "OK");
+                return;
+            }
+
+            case "TOP": {
+                // "TOP <display>" — the task in front of a display and its package, or
+                // "OK -1 -" for none. The touchpad lies over the phone's own screen and
+                // asks this twice a second while it is up: Home, a call answered, an app
+                // opened from the shade all put a new task in front there, underneath it,
+                // and that is its cue to get out of the way. Read-only, as LIST is — and
+                // unlike LIST it answers on Android 11 too (AppTasks.onDisplay).
+                int d = i(a, 1);
+                for (AppTasks.Task t : AppTasks.onDisplay(d)) {
+                    if (!t.visible) continue;
+                    out.println("OK " + t.id + " " + (t.pkg.isEmpty() ? "-" : t.pkg));
+                    return;
+                }
+                out.println("OK -1 -");
+                return;
+            }
+
+            default:
+                out.println("ERR unknown " + a[0]);
+        }
+    }
+
+    // ── the touchpad's helpers ─────────────────────────────────────────────
+
+    /** One injector per display, so each keeps its own idea of what is held. */
+    private static final java.util.Map<Integer, AppInput> PAD_INPUT = new java.util.HashMap<>();
+
+    /** Notches in one WHEEL line, at most: a flick sends a few, never this many. */
+    private static final float WHEEL_MAX = 100f;
+
+    private static AppInput padInput(int displayId) {
+        synchronized (PAD_INPUT) {
+            AppInput in = PAD_INPUT.get(displayId);
+            if (in == null) {
+                // No clipboard: the pad sends no text, only the pointer and its Back key.
+                in = new AppInput(displayId, null);
+                PAD_INPUT.put(displayId, in);
+            }
+            return in;
+        }
+    }
+
+    /**
+     * Least time between two lookups of the desktop's display for the launcher. The pad
+     * sends sixty MOUSE lines a second, and the lookup asks for every task on the phone.
+     */
+    private static final long PAD_LOOKUP_GAP_MS = 2000L;
+    private static volatile int padDesktop = -1;
+    private static long padDesktopAt;
+
+    /**
+     * The display a touchpad verb names, or -1 having answered why not.
+     *
+     * The PC may aim anywhere, as with every other verb. The launcher may aim only at the
+     * display its desktop is on — the one LauncherActivity is running on, which is never
+     * the phone's own (0). A display the cached answer does not match is looked up again,
+     * at most every PAD_LOOKUP_GAP_MS: a reconnect makes a new desktop display, and the
+     * first line after it must not be refused for long.
+     */
+    private static int padDisplay(String[] a, Caller caller, PrintWriter out) {
+        int d = i(a, 1);
+        if (caller == Caller.PC) return d;
+        if (d > 0 && (d == padDesktop || d == lookUpPadDesktop())) return d;
+        out.println("ERR not the desktop's display: " + d);
+        return -1;
+    }
+
+    private static synchronized int lookUpPadDesktop() {
+        long now = System.currentTimeMillis();
+        if (now - padDesktopAt < PAD_LOOKUP_GAP_MS) return padDesktop;
+        padDesktopAt = now;
+        int found = -1;
+        try {
+            for (Wm.TaskRec t : Wm.runningTasks()) {
+                // Highest wins: ids only grow, and a session's corpse may still be listed
+                // beside the live one for a moment after a reconnect.
+                if (t.displayId > 0 && LAUNCHER.equals(t.pkg)
+                        && (LAUNCHER + ".LauncherActivity").equals(t.activity)) {
+                    found = Math.max(found, t.displayId);
+                }
+            }
+        } catch (Refl.WmError e) {
+            log("touchpad: cannot find the desktop (" + e.getMessage() + ")");
+        }
+        padDesktop = found;
+        return found;
+    }
+
+    /**
+     * Give {@code displayId} the keyboard if another display has it: the task it handed it
+     * to, 0 when it already had it, -1 when there was nothing there to hand it to.
+     *
+     * Before Android 14 only the topmost display has a focused window at all (see
+     * AppTasks.focus), and touching the phone's screen makes the phone's display the
+     * topmost — so a key aimed at the desktop afterwards waits for a window that is never
+     * focused, holding every key behind it, until it times out. Its top task is the one
+     * given focus: on a desktop that is the window in front, or the desktop itself.
+     */
+    private static int giveKeyboard(int displayId) {
+        if (AppTasks.focusedDisplay() == displayId) return 0;
+        for (AppTasks.Task t : AppTasks.onDisplay(displayId)) {
+            if (!t.visible) continue;
+            AppTasks.focus(t.id);
+            return t.id;
+        }
+        return -1;
+    }
+
+    private static float f(String[] a, int ix) {
+        if (a.length <= ix) throw new IllegalArgumentException("missing arg " + ix);
+        return Float.parseFloat(a[ix]);
+    }
+
+    // ── /proc readers ─────────────────────────────────────────────────────
+    // All of these are here rather than in the launcher for one reason: the
+    // launcher is untrusted_app, which has not been allowed to read /proc/stat
+    // since Android 9 and cannot see other processes' /proc at all. This runs
+    // as shell (uid 2000), in the readproc group.
+
+    /** {busy, total} jiffies from /proc/stat, or null if it cannot be read. */
+    private static long[] readCpuJiffies() {
+        String line = null;
+        try (BufferedReader r = new BufferedReader(new java.io.FileReader("/proc/stat"))) {
+            line = r.readLine();
+        } catch (Throwable ignored) {
+        }
+        if (line == null || !line.startsWith("cpu ")) return null;
+        long total = 0;
+        long idle = 0;
+        String[] f = line.trim().split("\\s+");
+        for (int ix = 1; ix < f.length; ix++) {
+            long v;
+            try {
+                v = Long.parseLong(f[ix]);
+            } catch (NumberFormatException e) {
+                continue;
+            }
+            total += v;
+            // idle + iowait: waiting on storage is not the CPU working
+            if (ix == 4 || ix == 5) idle += v;
+        }
+        return new long[]{total - idle, total};
+    }
+
+    /** An Android process is named for its package; "" and null mean not one. */
+    private static String processName(String pid) {
+        byte[] buf = readSmall("/proc/" + pid + "/cmdline");
+        if (buf == null) return null;
+        int end = 0;
+        while (end < buf.length && buf[end] != 0) end++;
+        if (end == 0) return null;
+        String name = new String(buf, 0, end, java.nio.charset.StandardCharsets.UTF_8);
+        // Native processes are paths ("/system/bin/…"); apps are package names.
+        if (name.indexOf('/') >= 0 || name.indexOf('.') < 0) return null;
+        return name;
+    }
+
+    /** Resident set size in KiB. NOT PSS — smaps_rollup is denied to shell. */
+    private static long rssKb(String pid) {
+        byte[] buf = readSmall("/proc/" + pid + "/statm");
+        if (buf == null) return 0;
+        String[] f = new String(buf, java.nio.charset.StandardCharsets.UTF_8).trim().split("\\s+");
+        if (f.length < 2) return 0;
+        try {
+            // field 2 is resident pages; 4 KiB pages on every device we target
+            return Long.parseLong(f[1]) * 4;
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    /** utime + stime for a process, in jiffies. */
+    private static long procJiffies(String pid) {
+        byte[] buf = readSmall("/proc/" + pid + "/stat");
+        if (buf == null) return 0;
+        String line = new String(buf, java.nio.charset.StandardCharsets.UTF_8);
+        // The comm field is parenthesised and may contain spaces, so fields are
+        // counted from the LAST ')' rather than from the start of the line.
+        int close = line.lastIndexOf(')');
+        if (close < 0) return 0;
+        String[] f = line.substring(close + 1).trim().split("\\s+");
+        // after comm and state: utime is field 11, stime 12 (0-based here)
+        if (f.length < 13) return 0;
+        try {
+            return Long.parseLong(f[11]) + Long.parseLong(f[12]);
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    private static byte[] readSmall(String path) {
+        try (java.io.FileInputStream in = new java.io.FileInputStream(path)) {
+            byte[] buf = new byte[512];
+            int n = in.read(buf);
+            if (n <= 0) return null;
+            byte[] out = new byte[n];
+            System.arraycopy(buf, 0, out, 0, n);
+            return out;
+        } catch (Throwable t) {
+            return null; // process died mid-scan, or not ours to read
+        }
+    }
+
+    private static int i(String[] a, int ix) {
+        if (a.length <= ix) throw new IllegalArgumentException("missing arg " + ix);
+        return Integer.parseInt(a[ix]);
+    }
+
+    // ── dead-man switch ────────────────────────────────────────────────────────────
+    //
+    // Ending a session normally is the PC's job: it kills scrcpy and undoes, over adb,
+    // everything the launch turned on. Pull the cable and none of that can run — the
+    // desktop vanishes but the phone keeps freeform windowing, a relaxed hidden-API
+    // policy, our accessibility service, a granted overlay app-op, and this process.
+    //
+    // This one runs at uid 2000 — the same authority the PC's `adb shell` had — so it
+    // does the undo itself. `setsid` does NOT make it outlive the cable everywhere:
+    // when adbd restarts, init kills adbd's whole cgroup, and this process is in it.
+    // The S25 Ultra restarts adbd three seconds after every unplug. So the launcher
+    // keeps a copy of the undo (ARMED) and, holding WRITE_SECURE_SETTINGS for the
+    // session, puts the settings back itself once this process is gone; the app-ops,
+    // the widget whitelist and the pointer speed wait for the PC.
+
+    /** Last ARM from the PC. Only ARM refreshes it; see the verb for why. */
+    private static volatile long lastArmMs = 0L;
+    /** How long silence has to last before the PC counts as gone. */
+    private static volatile long ttlMs = 0L;
+    /** The one part of the undo only the PC can know. Null until armed. */
+    private static volatile String undoGlobals = null;
+    /** Why the watchdog is holding back, said once per stretch of it; null when it is not. */
+    private static String holding = null;
+
+    /** A line in wmd.log, with the time: the log is read after the fact, against the PC's. */
+    private static void log(String line) {
+        System.out.println(new java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.ROOT)
+                .format(new java.util.Date()) + " " + line);
+        System.out.flush();
+    }
+
+    private static void watchdog() {
+        while (true) {
+            try {
+                // Every second: the PC's TTL is ten seconds now (WATCHDOG_TTL_SECS),
+                // and a five-second tick would make that anything up to fifteen.
+                Thread.sleep(1000L);
+            } catch (InterruptedException e) {
+                return;
+            }
+            // A panel we blanked must not outlive the desktop that asked for it, and
+            // this tick is the only thing that can notice: a shutdown hook was tried and
+            // does not fire — ART leaves SIGTERM to the kernel, so `pkill` takes this
+            // process with the panel still dark. Ahead of the ARM guard because a session
+            // that never armed can still have blanked the phone, and the task-tree read
+            // costs nothing while the panel is lit.
+            if (Screen.isOff()) {
+                boolean desktopGone = false;
+                try {
+                    desktopGone = Wm.displayHosting(LAUNCHER) <= 0;
+                } catch (Throwable t) {
+                    // A framework hiccup is not evidence that anything went away.
+                }
+                if (desktopGone) {
+                    log("watchdog: desktop gone with the panel dark — restoring it");
+                    Screen.restore();
+                }
+            }
+
+            String globals = undoGlobals;
+            if (globals == null) continue;                                  // never armed
+            long silent = System.currentTimeMillis() - lastArmMs;
+            if (silent < ttlMs) {                                           // PC still there
+                holding = null;
+                continue;
+            }
+
+            // Silence alone is not enough. The PC also goes quiet for a few seconds
+            // whenever it cycles the session itself — the Settings window's "restart
+            // desktop" — and cleaning up under a desktop that is coming right back would
+            // be worse than not cleaning up at all. The display having gone too is what
+            // separates "restarting" from "gone".
+            int display;
+            try {
+                display = Wm.displayHosting(LAUNCHER);
+            } catch (Throwable t) {
+                // A framework hiccup is not evidence of anything. Wait for a clean read.
+                log("watchdog: cannot read the task tree (" + t + ") — holding");
+                continue;
+            }
+            if (display > 0) {
+                holding = null;
+                continue;
+            }
+
+            // Still on a computer's USB port: the cable never came out — the PC
+            // app restarting — or it is already back in, and the PC re-arms in a
+            // moment and sets the desktop up again around whatever is here.
+            // Undoing the session under that would race it: measured on the S25
+            // Ultra, a cable put back nine seconds after it was pulled met this
+            // undo half way through the PC's reconnect. Wall chargers say AC.
+            if (sh("dumpsys battery").contains("USB powered: true")) {
+                if (holding == null) {
+                    holding = "usb";
+                    log("watchdog: no PC for " + (silent / 1000) + "s, but on a computer's USB port — holding");
+                }
+                continue;
+            }
+
+            log("watchdog: no PC for " + (silent / 1000)
+                    + "s and no desktop display — undoing the session");
+            cleanup(globals);
+            log("watchdog: done, exiting");
+            System.out.flush();
+            System.exit(0);
+        }
+    }
+
+    /**
+     * The same undo the PC would have run, minus the parts that only make sense with a
+     * cable attached. Ordered so this process is the last thing standing.
+     */
+    private static void cleanup(String globals) {
+        // Before anything else: the undo below ends in force-stopping the launcher, and a
+        // dark phone with no desktop left to turn it back on is the worst state to leave.
+        Screen.restore();
+
+        // The media-route pin is desktop policy set with this process's authority
+        // (AUDIOROUTE SET), and this process is about to exit — left behind it would
+        // quietly overrule the phone's own output switcher. The PC clears it on a
+        // normal exit (restore_phone); this is the cable-pulled twin. Best effort:
+        // with nothing pinned the framework answers an error, which is the same
+        // outcome spelled differently.
+        try {
+            Audio.clear();
+        } catch (Throwable t) {
+            log("watchdog: no media-output pin to clear (" + t.getMessage() + ")");
+        }
+
+        sh(globals);
+
+        // Read the accessibility list NOW rather than taking it from the ARM: a session
+        // can be hours long, and anything the user switched on in the meantime — a
+        // screen reader, a password manager — is in this same list. Writing back a
+        // reading from session start would silently turn it off.
+        String rest = withoutCaptionService(sh("settings get secure enabled_accessibility_services"));
+        sh(rest.isEmpty()
+                ? "settings delete secure enabled_accessibility_services; "
+                        + "settings put secure accessibility_enabled 0"
+                : "settings put secure enabled_accessibility_services '" + rest + "'");
+
+        // App-ops and the widget-bind whitelist the PC granted over adb without
+        // the user ever seeing a prompt. Widgets already on the desktop stay
+        // bound; this only closes the door on silent NEW binds. No-op (an error
+        // string, swallowed) before Android 12, which has no `cmd appwidget`.
+        // WRITE_SECURE_SETTINGS goes the same way: the PC grants it for the session
+        // so the launcher can do this undo when this process cannot. A development
+        // permission, so taking it back does not kill the app, Linux included.
+        sh("appops set " + LAUNCHER + " SYSTEM_ALERT_WINDOW default; "
+                + "appops set " + LAUNCHER + " ACCESS_RESTRICTED_SETTINGS default; "
+                + "cmd appwidget revokebind --package " + LAUNCHER + " --user 0; "
+                + "pm revoke " + LAUNCHER + " android.permission.WRITE_SECURE_SETTINGS");
+
+        // The launcher's own Linux, when it is running, is somebody's session: a
+        // computer's desktop window carries on over Wi-Fi once the cable is out,
+        // and Remote access serves SSH from it. DeX's own windows went with its
+        // display — scrcpy destroys a display's content along with it — so there
+        // is nothing of DeX left in the launcher to stop, and a force-stop would
+        // end that session as well. The PC, plugged back in, sets DeX up again
+        // around the running launcher (adb_start_launcher's `resume`).
+        if (!sh("pidof " + LAUNCHER + ":linux").trim().isEmpty()) {
+            log("watchdog: the launcher's Linux is running — leaving the launcher be");
+            return;
+        }
+
+        sh("am force-stop " + LAUNCHER);
+
+        // The force-stop took Linux's remote access down with everything else,
+        // and on a phone whose user left it on, the broadcast right behind it is
+        // what brings it back — restore_phone in adb.rs sends the same one after
+        // its own force-stop; this is the cable-pulled twin. Without it a phone
+        // unplugged mid-session stayed unreachable over SSH and the desktop
+        // window until something else restarted the app. The receiver does
+        // nothing for a phone that has remote access off. 0x20 is
+        // FLAG_INCLUDE_STOPPED_PACKAGES (a force-stopped package is skipped by
+        // broadcasts otherwise), 0x10000000 FLAG_RECEIVER_FOREGROUND.
+        sh("am broadcast -n " + LAUNCHER + "/.RemoteResumeReceiver -a " + REMOTE_RESUME
+                + " -f 0x10000020 >/dev/null 2>&1");
+    }
+
+    /** RemoteResumeReceiver's action: "bring Remote access back if it was on". */
+    private static final String REMOTE_RESUME = LAUNCHER + ".remote.RESUME";
+
+    /**
+     * Drop our caption service from a colon-separated accessibility list, leaving every
+     * other entry untouched. Mirrors {@code without_caption_service} in adb.rs — the PC
+     * does this when it can reach the phone, this side when it cannot.
+     */
+    static String withoutCaptionService(String list) {
+        if (list == null) return "";
+        String s = list.trim();
+        // `settings get` prints the literal string "null" for an unset key.
+        if (s.isEmpty() || "null".equals(s)) return "";
+        StringBuilder out = new StringBuilder();
+        for (String part : s.split(":")) {
+            String p = part.trim();
+            if (p.isEmpty() || CAPTION_SERVICE.equals(p)) continue;
+            if (out.length() > 0) out.append(':');
+            out.append(p);
+        }
+        return out.toString();
+    }
+
+
+
+    /**
+     * The stack a task belongs to, or -1 — the id moveStackToDisplay wants when the
+     * platform is too old to take a task id.
+     */
+    private static int stackForTask(int taskId) {
+        for (String raw : sh("dumpsys activity activities").split("\n")) {
+            String line = raw.trim();
+            if (!isTaskLine(line) || intAfter(line, " #") != taskId) continue;
+            return intAfter(line, "StackId=");
+        }
+        return -1;
+    }
+
+    /**
+     * A task running {@code component} on some display other than {@code want}.
+     *
+     * Returns {task id, stack id} or null. Read from {@code dump} — `dumpsys activity
+     * activities` — rather than the task API for the reason spelled out on
+     * displayFromDump: the API is Android 12, and the phones that need any of this are
+     * older.
+     *
+     * Null as well when the app already has a window on {@code want}: the launch landed
+     * where it was asked to, and a second window of the same app on the phone is the
+     * phone's own. Taking that one too is "I opened YouTube on the desktop and the
+     * YouTube I was watching on the phone vanished".
+     *
+     * Matched by package except for our own package — see matches — and only on the
+     * activities' own lines, see isHistLine.
+     */
+    static int[] strayTask(String dump, String component, int want) {
+        int display = -1;
+        int task = -1;
+        int stack = -1;
+        int[] stray = null;
+        for (String raw : dump.split("\n")) {
+            String line = raw.trim();
+            if (line.startsWith("Display #")) {
+                display = intAfter(line, "Display #");
+                task = -1;
+                continue;
+            }
+            if (isTaskLine(line) && line.startsWith("* ")) {
+                task = intAfter(line, " #");
+                stack = intAfter(line, "StackId=");
+                continue;
+            }
+            // The activity lives on the Hist line under its task, so the ids above are
+            // still the ones this line belongs to.
+            if (task < 0 || display < 0 || !isHistLine(line) || !matches(line, component)) {
+                continue;
+            }
+            if (display == want) return null;
+            if (stray == null) stray = new int[]{task, stack >= 0 ? stack : task};
+        }
+        return stray;
+    }
+
+    /** Uninterruptible enough for a poll; a spurious wake just polls again. */
+    private static void sleep(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+    /**
+     * Which display is hosting {@code pkg}, read from `dumpsys activity activities`.
+     *
+     * The task-API twin of this (Wm.displayHosting) needs getAllRootTaskInfos, which
+     * arrived in Android 12. The dump has said the same thing since long before that
+     * and says it on every version, which is the whole point: this path is only ever
+     * taken by phones too old for the other one.
+     */
+    private static int displayFromDump(String pkg) {
+        int display = -1;
+        for (String raw : sh("dumpsys activity activities").split("\n")) {
+            String line = raw.trim();
+            if (line.startsWith("Display #")) {
+                display = intAfter(line, "Display #");
+            } else if (display >= 0 && isTaskLine(line) && line.contains(pkg)) {
+                return display;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Task id of the front-most task on {@code displayId} that is not {@code skipPkg},
+     * or -1. The dump prints each display's tasks top to bottom, so the first match is
+     * the window a person would call the one in front.
+     *
+     * Found through its activity (isHistLine) rather than its task line. After the last
+     * display the dump lists every display's tasks again, under headers that are not
+     * "Display #" — so a desktop holding nothing but the launcher, printed last, used to
+     * run on into that listing and answer with a task of the PHONE's, which CLOSETOP
+     * then closed.
+     */
+    static int topTaskFromDump(String dump, int displayId, String skipPkg) {
+        boolean here = false;
+        int task = -1;
+        for (String raw : dump.split("\n")) {
+            String line = raw.trim();
+            if (line.startsWith("Display #")) {
+                here = intAfter(line, "Display #") == displayId;
+                task = -1;
+                continue;
+            }
+            if (!here) continue;
+            if (isTaskLine(line) && line.startsWith("* ")) {
+                task = intAfter(line, " #");
+                continue;
+            }
+            if (task >= 0 && isHistLine(line) && !line.contains(skipPkg)) return task;
+        }
+        return -1;
+    }
+
+    /**
+     * Whether a trimmed dump line is an activity's own entry under its task:
+     * "* Hist #0: ActivityRecord{…}", or "* Hist  #0:" as Android 15 pads it.
+     *
+     * The only lines that may be read as "this activity lives in the task above". The
+     * dump names activities in a dozen other places — mLastPausedActivity, printed
+     * before its own task's line; ResumedActivity and mFocusedApp, printed after the
+     * last display — and with the display and task still set from the section parsed
+     * last, each of those reads as an activity of the phone's bottom-most task. That is
+     * how opening YouTube on a Galaxy A13's desktop moved Google's voice search onto it,
+     * and opening Clock moved Settings.
+     */
+    private static boolean isHistLine(String line) {
+        return line.startsWith("* Hist")
+                && line.substring("* Hist".length()).trim().startsWith("#")
+                && line.contains("ActivityRecord{");
+    }
+
+    /**
+     * Whether an ActivityRecord line belongs to the app we are reclaiming.
+     *
+     * BY PACKAGE, not by the exact activity: an app rarely lands on the activity that
+     * was asked for. Chrome answers a launch with its first-run screen, and plenty of
+     * apps answer with a trampoline — the task is the app's either way, and the task is
+     * what moves.
+     *
+     * OUR OWN package is the exception and must match in full. The desktop's launcher
+     * carries the same package as its Settings and Task Manager, and a package match
+     * would move the desktop itself onto the desktop, which ends with an empty display.
+     */
+    private static boolean matches(String line, String component) {
+        int slash = component.indexOf('/');
+        String pkg = slash > 0 ? component.substring(0, slash) : component;
+        if (LAUNCHER.equals(pkg)) return line.contains(component);
+        return line.contains(pkg + "/");
+    }
+
+    /** Both spellings: Android 10 prints TaskRecord{…}, later versions Task{…}. */
+    private static boolean isTaskLine(String line) {
+        return line.contains("TaskRecord{") || line.contains("Task{");
+    }
+
+    /** The run of digits following {@code marker}, or -1. */
+    private static int intAfter(String line, String marker) {
+        int at = line.indexOf(marker);
+        if (at < 0) return -1;
+        int i = at + marker.length();
+        int start = i;
+        while (i < line.length() && Character.isDigit(line.charAt(i))) i++;
+        try {
+            return i > start ? Integer.parseInt(line.substring(start, i)) : -1;
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+    /** Run a shell command with this process's own authority, stdout back. */
+    private static String sh(String cmd) {
+        if (cmd == null || cmd.trim().isEmpty()) return "";
+        try {
+            // Absolute: this process is exec'd by app_process, not by a login shell, and
+            // is not owed a usable PATH.
+            Process p = new ProcessBuilder("/system/bin/sh", "-c", cmd)
+                    .redirectErrorStream(true)
+                    .start();
+            StringBuilder out = new StringBuilder();
+            try (BufferedReader r =
+                         new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                String line;
+                while ((line = r.readLine()) != null) out.append(line).append('\n');
+            }
+            p.waitFor();
+            return out.toString().trim();
+        } catch (Throwable t) {
+            System.out.println("watchdog: `" + cmd + "` failed: " + t);
+            return "";
+        }
+    }
+}

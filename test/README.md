@@ -1,0 +1,225 @@
+# Tests
+
+`openandroiddex-signal` is a protocol implementation, which makes it the one
+piece of this project worth checking without a phone in your hand. It runs under
+plain Node with no dependencies:
+
+```sh
+node test/signal-test.js
+```
+
+It starts the rendezvous on a spare port and runs a host and two viewers through
+the exact message dance the phone and the browser do — including a viewer trying
+to forge another viewer's id, a viewer closing its tab, and the phone
+reconnecting to reclaim its room.
+
+It is also how the half-open socket bug was found: a socket taken over from an
+HTTP upgrade emits `end`, not `close`, so a viewer that shut its tab was never
+reported gone and its room entry lived forever.
+
+`openandroiddex-remote` is the other protocol worth checking off a phone, and
+`remote-test.js` runs both of its ends against each other — over the real public
+relays and address lookup, so it needs the internet, and with Rust and Node:
+
+```sh
+node test/remote-test.js
+```
+
+It plays LinuxService: runs the phone daemon, writes the computer list the way
+the app does when a pairing arrives, and then logs in through the tunnel with
+the system's own OpenSSH, on the host key the daemon generated and the
+`~/.ssh` files the pairing wrote (under a scratch HOME — the real one is never
+touched). Along the way: an unpaired computer turned away with a sentence, the
+direct path and the relay-only one, 4 MB intact with half-close, a removal
+closing a live session, scp, three sessions at once over the relay alone, the
+daemon on its own resolver taking new DNS servers from a `net` and staying
+reachable, a reopened code ending at its first deadline by the wall clock, and
+a changed host key refused. Then files onto the phone with `dexremote put` —
+SFTP inside the tunnel, against the same real sshd: a file and a folder byte
+for byte, with their times and executable bit, a link inside the folder left
+out and said so, a second and third drop named the way Thunar names copies
+and the first one untouched, the relay alone, Ctrl+C taking back the folder it
+was in the middle of, a host key other than the paired one refused before a
+byte is sent, and every copy's session let go. And back with `dexremote
+get`: the guest's script and Send To entry written, the script run as Thunar
+runs it, a file and a folder fetched into a scratch Downloads byte for byte
+(a large one in ranges), what had gone or was unreadable in Linux counted and
+not fatal, "(2)" for a second copy, and the dock's icon sending to the
+computer that is looking. Then the desktop, with `dexremote desktop` against
+a stand-in websockify: refused with a sentence when there is no Linux, never
+started unless asked, a start the app reports failed, the size held to what a
+phone can carry, the password handed over, the page and 1 MB of WebSocket
+through the tunnel as one session, requests from other sites and other host
+names turned away, and Ctrl+C letting the phone go at once. And the desktop as
+video, against a stand-in LinuxStream on a Unix socket: the phone saying it
+has it, the address printed, the app's page through with the token kept here,
+1 MB both ways, other tokens, origins and hosts refused, and a phone without
+it refusing in a sentence.
+
+The desktop over adb (`doc/usb-desktop.md`) has its own, with Node 24 and a JDK:
+
+```sh
+node test/usb-desktop-test.mjs
+node test/usb-desktop-test.mjs --device [serial] [--size 2560x1440]
+```
+
+The first runs the window's H.264 handling and key mapping as they are (Node
+imports the `.ts` files), and the launcher's own `LinuxStreamRfb` and
+`LinuxStreamSocket`, compiled for this JVM, against a stand-in Xvnc in Node:
+VncAuth, the encodings asked for, every sampled pixel, the cursor, a resize,
+input, the clipboard — TigerVNC's extended one, UTF-8 both ways up to Xvnc's
+256 KB, and Latin-1 against a server without it — the probe and the WebSocket. `--device` then runs the
+stream classes on a phone under `app_process` as the shell user — nothing is
+installed and the launcher is not touched — against a stand-in Xvnc on the
+phone's own loopback that changes every pixel of every frame, and a headless
+Chrome decodes the hardware-encoded stream with WebCodecs, sends input and a
+resize, and prints the frame rate and where the time goes. It cleans up after
+itself; the frame rate is checked only on a cable, since wireless debugging's
+is the link's.
+
+Linux apps as windows of their own (`doc/linux-windows.md`) have their pure
+parts checked the same way, with a JDK:
+
+```sh
+node test/linux-windows-test.mjs
+```
+
+It compiles the launcher's own `X11`, `X11Keys`, `LinuxWm` and `LinuxApps` for
+this JVM and runs them: keysyms found in a us layout's columns, Shift and Level
+3 where they are needed, a keycode lent to a keysym the layout lacks and never
+taken back while held; the session's Xauthority cookie; the guest's xfconf
+`xsettings` channel read as XSETTINGS names, the user's file winning, and the
+XSETTINGS wire format read back byte for byte; damage rectangles clipped and
+merged; and the `.desktop` scanner on a scratch rootfs — what the menu hides
+left out, field codes dropped, a terminal app wrapped, `~/.local` overriding,
+and icons found through links that name guest paths, and through links proot
+wrote with this side's. The window manager against a real Xvnc needs a guest
+and is recorded in the design record.
+
+The Linux setup script's helpers (`openandroiddex-linux/README.md`, "Skip,
+Restart and a line that moves") are checked on a phone, under its own
+`/system/bin/sh` — mksh, the shell the app runs the script with, whose
+arithmetic is 32-bit:
+
+```sh
+node test/linux-setup-test.mjs [serial]
+```
+
+It pushes the script and `test/linux-setup/checks.sh` to a directory of its own
+in `/data/local/tmp` and runs, as the shell user, the functions cut out of the
+real script by name, every guest command handed to a stand-in — no rootfs, and
+nothing of the app touched: a step's line (apt's status lines read from the
+end, a tarball's percent with no 32-bit overflow, the ticker publishing within
+5 s and gone after), dpkg left half way and the repair that finishes a wanted
+package and removes a skipped one, one package's state read from dpkg's status
+file with no apt (half-configured is not installed, and a name another only
+begins with is not that one), Restart's clean-up, what an app no longer
+wanted leaves behind, a half-extracted VS Code or IntelliJ never taken for an
+install, an extract that lands whole or leaves the old tree, a download kept
+through a timeout and started over only for curl 33 or HTTP 416, and the setsid
+re-exec keeping the pid while one group kill takes the whole run. It removes
+what it pushed. What needs a guest is listed as unverified in the design record.
+
+The phone apps' windows (`doc/apps-on-pc.md`) keep their app when their
+connection goes — the cable pulled with Wi‑Fi still there — and the phone's
+half of that is checked on a phone or an emulator, with the Android SDK and
+nothing of the app's running:
+
+```sh
+node test/apps-reconnect-test.mjs [serial]
+```
+
+It pushes the window daemon's dex (build it first: `openandroiddex-wmd/build.sh`,
+or `npm run apk`) and runs the app server as the app does, then speaks the
+window wire to it over adb: a window that waits for its computer and takes a
+new connection, a second connection taking it from the first, a window closed
+after it came back handing its app back, an app opened on the phone while its
+window was away making that window "closed" to a computer that comes back, an
+unknown window, the server stopping 30 s after its shell went with nobody
+back, and "stop" ending it at once. It opens the phone's Settings in windows
+of its own, and every one goes back to the phone by the end.
+
+Two more speak the same wire to a window of Settings' search, and end it
+after:
+
+```sh
+node test/apps-keys-test.mjs [serial]
+node test/apps-drop-in-test.mjs [serial] [package/activity]
+```
+
+The first sends keys as the computer sends them. Ctrl+A and Ctrl+C copy the
+field's text, and Shift+Left selects: a text field reads Shift from Shift's
+own key, which the phone now sends around the arrow. On a debuggable build
+(an emulator's google_apis image) it also reads the order of the keys the
+phone dispatched: Ctrl down, A, Ctrl up, and the rest. The second needs this
+build's launcher on the phone. It stages a text file and drops it on the
+search field, which takes it as its text. A text file and a picture dropped
+together are taken too, and the picture, which no text field opens, lands
+in Download as well, byte for byte: an app may use only part of a drop. A
+drop made while the window loses the keyboard every 20 ms still lands on the
+field. These three need the field to be a TextView, not Compose, as it is on
+newer Pixel images; name an activity with one, and its first text field
+stands in for search's. Last, it drops a file where nothing takes it, which
+lands in Download byte for byte, without clicking the app on the way.
+
+The phone's notifications on the computer (`doc/phone-notifications.md`) have
+their phone's half checked the same way:
+
+```sh
+node test/notifications-test.mjs [serial]
+```
+
+It runs the app server from the dex as the app does and speaks its control
+wire: notifications turned on (a snapshot, nothing already there as news, and
+the calls ringing), asked again while on (everything again), the shell's own
+`cmd notification post` as an app posting — news once, the same words again
+nothing, new words at once an update and a moment later news again — a
+conversation as its last messages, a sender's picture, a dismissal both ways,
+a button on a notification that has gone refused and said, the test
+notification, the listener stopping when the connection that asked goes
+(hello first on the next, nothing it has not asked for, everything once it
+does) and when another connection takes its place (the one replaced refused),
+and notifications turned off. On an emulator it also texts its Messages app
+(`emu sms send`) and rings its phone (`emu gsm call`), and reads what each
+did back from the phone itself rather than from what the server says: a
+window opened at a notification by its own intent shows Messages on the
+window's display and not the phone's, and Messages has that conversation
+read and another one not; a click with the window open, the same in that
+window; a reply sent is in the phone's sent messages, to the one who wrote;
+"Mark as read" leaves the text read; and a call answered from the computer
+puts the phone in the call and goes in its call log as answered, one
+declined goes in as declined, one the caller ends as missed — by CallStyle's
+own answer and decline, or, on a dialer from before it (AOSP's, on the
+Android 12 image), by its own buttons, chosen by their words. It uses the
+app's own adb when there is one, so a phone a running app shares is not
+dropped by an adb server of another version, and everything it posts is gone
+from the phone when it ends; run it on an AVD started with `-read-only` to
+leave the AVD's texts and call log as they were.
+
+The phone's screen as the touchpad of its apps' windows on the computer
+(`doc/phone-touchpad.md`, §10) has its phone's half checked the same way:
+
+```sh
+node test/pad-test.mjs [serial]
+```
+
+It needs this build's launcher on the phone (a desktop session installs it).
+It runs the app server from the dex, asks for the pad on the control wire and
+touches the pad the launcher puts up, for real, reading what reaches the
+computer: offered, with the launcher let draw over other apps; a connection to
+the pad's port from anything but the launcher refused; with one finger
+(`input`) a slide as moves, a tap as a click, a held finger as a right click,
+◁ as Back; with two and three (the dex's `Probe fingers`, as the shell) a
+scroll in notches, a right click, the next and previous window, Back, and the
+desktop's own gestures reaching nothing; Settings in a window of its own
+keeping the pad off the phone's screen, as Android does every app's overlay,
+and the pad saying so and then that it is back (Android 15 and later) — with
+its toast on the phone where the launcher may post notifications, Android
+dropping it otherwise — but not the shade pulled over it, nor the screen
+going dark and lit again; an app put in front on the phone's screen, and ✕,
+each putting the pad away; and withdrawn, the app-op as it was. It puts the
+launcher's app-op back to what it found.
+
+Everything else needs a device. `doc/web-viewer.md`, `doc/remote-access.md`,
+`doc/usb-desktop.md`, `doc/apps-on-pc.md` and `doc/phone-notifications.md`
+list what is still unverified there.

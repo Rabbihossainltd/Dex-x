@@ -1,0 +1,20 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+rootProject.name = "openandroiddex-launcher"
+include ":app"
+// LinuxOnDroid: the same sources as :app behind a three-component manifest, so
+// the container can ship as an app of its own. Adds `:linuxapp:assembleDebug`
+// and changes nothing about `assembleDebug` — see linuxapp/build.gradle for why
+// it is a module and not a product flavour.
+include ":linuxapp"

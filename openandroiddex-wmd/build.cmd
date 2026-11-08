@@ -1,0 +1,76 @@
+@echo off
+REM Build openandroiddex-wmd into a single dex, no Gradle and no Android project.
+REM The daemon is not an app: it is loaded by `app_process` at uid 2000, so it needs
+REM nothing but class files run through d8.
+REM
+REM   build.cmd            compile + dex
+REM   build.cmd push       ... and push to /data/local/tmp/wmd.dex
+
+setlocal enabledelayedexpansion
+set HERE=%~dp0
+set SDK=%LOCALAPPDATA%\Android\Sdk
+
+if not exist "%SDK%\platforms\android-36\android.jar" (
+  echo ERROR: android-36 platform not found under %SDK%
+  exit /b 1
+)
+
+set BUILDTOOLS=
+for %%v in (36.1.0 36.0.0 35.0.0 34.0.0) do (
+  if not defined BUILDTOOLS if exist "%SDK%\build-tools\%%v\d8.bat" set BUILDTOOLS=%SDK%\build-tools\%%v
+)
+if not defined BUILDTOOLS (
+  echo ERROR: no build-tools with d8 found
+  exit /b 1
+)
+
+REM JAVA_HOME if set, else Android Studio's bundled JBR wherever it installed,
+REM else whatever javac is on PATH. build.sh picks in the same order.
+set JAVAC=
+if defined JAVA_HOME if exist "%JAVA_HOME%\bin\javac.exe" set JAVAC=%JAVA_HOME%\bin\javac.exe
+for %%d in (
+  "%ProgramFiles%\Android\Android Studio"
+  "%LOCALAPPDATA%\Programs\Android Studio"
+) do (
+  if not defined JAVAC if exist "%%~d\jbr\bin\javac.exe" set JAVAC=%%~d\jbr\bin\javac.exe
+)
+if not defined JAVAC for %%p in (javac.exe) do if not defined JAVAC set JAVAC=%%~$PATH:p
+if not defined JAVAC (
+  echo ERROR: no javac. Set JAVA_HOME to a JDK 17 or newer, or install Android Studio.
+  exit /b 1
+)
+
+echo [1/3] javac  ^(!JAVAC!^)
+if exist "%HERE%build" rmdir /s /q "%HERE%build"
+mkdir "%HERE%build\classes"
+dir /s /b "%HERE%src\*.java" > "%HERE%build\sources.txt"
+REM The encoder's choice and set-up the app windows share with the launcher's
+REM Linux stream, from the launcher's sources (see build.sh): the same two.
+set LAUNCHER_SRC=%HERE%..\openandroiddex-launcher\app\src\main\java\com\ccrstech\openandroiddex\launcher
+for %%c in (LinuxStreamEncoder DexLog) do (
+  if not exist "%LAUNCHER_SRC%\%%c.java" (
+    echo ERROR: %LAUNCHER_SRC%\%%c.java is missing
+    exit /b 1
+  )
+  echo %LAUNCHER_SRC%\%%c.java>> "%HERE%build\sources.txt"
+)
+REM android.jar goes on the classpath, not the bootclasspath: JDK 17+ rejects
+REM -bootclasspath alongside -target 17. Everything we touch outside android.*
+REM is java.lang/util/io/net, which Android provides at runtime anyway.
+"%JAVAC%" -nowarn -Xlint:-options -source 17 -target 17 ^
+  -cp "%SDK%\platforms\android-36\android.jar" ^
+  -d "%HERE%build\classes" "@%HERE%build\sources.txt"
+if errorlevel 1 exit /b 1
+
+echo [2/3] d8
+mkdir "%HERE%build\dex"
+dir /s /b "%HERE%build\classes\*.class" > "%HERE%build\classes.txt"
+call "%BUILDTOOLS%\d8.bat" --min-api 26 --output "%HERE%build\dex" "@%HERE%build\classes.txt"
+if errorlevel 1 exit /b 1
+copy /y "%HERE%build\dex\classes.dex" "%HERE%openandroiddex-wmd.dex" >nul
+
+echo [3/3] done -^> %HERE%openandroiddex-wmd.dex
+if /i "%~1"=="push" (
+  adb push "%HERE%openandroiddex-wmd.dex" /data/local/tmp/wmd.dex
+)
+endlocal
