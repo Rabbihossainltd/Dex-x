@@ -846,11 +846,38 @@ fn read_desktop_secure(app: &tauri::AppHandle, serial: &str) -> HashMap<String, 
     parse_globals(&out, &DESKTOP_SECURE)
 }
 
+/// A `policy_control` value safe to put back verbatim.
+///
+/// [`restorable`] is the wrong test for this one: its charset is what a boolean
+/// global looks like, and a real `policy_control` is a list —
+/// `immersive.full=com.foo:*;immersive.status=*` — carrying `=`, `:`, `*` and
+/// `;`. Run through [`restorable`] every such value reads as "not restorable"
+/// and the undo DELETES a setting the user had. So the test is the opposite
+/// shape: anything that can go back inside a single shell word without escaping
+/// it, which is everything except whitespace, quotes and the separators the
+/// command itself is built from.
+fn restorable_policy(value: &str) -> Option<&str> {
+    let v = value.trim();
+    (!v.is_empty()
+        && v != "null"
+        && v.len() <= 256
+        && v.chars().all(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '=' | ':' | '*' | ',')
+        }))
+    .then_some(v)
+}
+
 /// Put the secure keys back: the value this phone had, or no row at all.
 fn undo_secure_script(saved: &HashMap<String, String>) -> String {
     let mut out = String::new();
     for key in DESKTOP_SECURE {
-        match saved.get(&format!("secure.{key}")).and_then(|v| restorable(v)) {
+        let row = saved.get(&format!("secure.{key}"));
+        let restored = if key == "policy_control" {
+            row.and_then(|v| restorable_policy(v))
+        } else {
+            row.and_then(|v| restorable(v))
+        };
+        match restored {
             Some(v) => out.push_str(&format!("settings put secure {key} {v}; ")),
             None => out.push_str(&format!("settings delete secure {key}; ")),
         }
