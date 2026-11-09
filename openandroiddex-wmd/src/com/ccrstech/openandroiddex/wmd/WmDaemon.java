@@ -287,7 +287,35 @@ public final class WmDaemon {
                     out.println("ERR not a component: " + comp);
                     return;
                 }
-                String reply = sh("am start --display " + display + " -n '" + comp + "'");
+                // MULTIPLE_TASK — the desktop gets a task OF ITS OWN, so the
+                // phone's own use of the same app cannot claim this window.
+                //
+                // Android searches every display for a reusable task and
+                // moves it when it finds one. Without this flag, opening an app
+                // the phone already has in the background makes the platform
+                // pick THAT task and drag it onto the desktop (or, coming the
+                // other way, take this one back to the phone). 0x18000000 is
+                // NEW_TASK|MULTIPLE_TASK; MULTIPLE_TASK is ignored without
+                // NEW_TASK, and `am` sets NEW_TASK itself only when asked to.
+                //
+                // Not added when the app already has a window here: that launch
+                // is a refocus, and minting a second task per tap is the "two
+                // copies of everything" bug. Same rule the launcher's own
+                // startWindowed uses (there: runningPkgs; here: this display's
+                // task list).
+                String pkgWanted = comp.substring(0, Math.max(0, comp.indexOf('/')));
+                boolean alreadyHere = false;
+                try {
+                    for (Wm.TaskRec t : Wm.tasksOnDisplay(display)) {
+                        if (t.pkg != null && t.pkg.equals(pkgWanted)) {
+                            alreadyHere = true;
+                            break;
+                        }
+                    }
+                } catch (Throwable ignored) {
+                }
+                String flags = alreadyHere ? "" : " -f 0x18000000";
+                String reply = sh("am start --display " + display + flags + " -n '" + comp + "'");
                 // `am` reports a refusal on stdout and still exits 0, so the text is the
                 // only answer there is.
                 boolean failed = reply.contains("Error") || reply.contains("Exception");
@@ -570,6 +598,42 @@ public final class WmDaemon {
                 Wm.setBounds(wct, t.token, want);
                 Wm.applyTransaction(wct);
                 out.println("OK");
+                return;
+            }
+
+            case "NATIVE": {
+                // "NATIVE <displayId> <taskId> <w> <h>" — make this task an
+                // ordinary full-screen window of ITS OWN display, with no
+                // caption strip.
+                //
+                // Android has one task per app, not one per display, so a task
+                // that lives on the desktop and is then claimed from the phone
+                // arrives there wearing the desktop's shape: a freeform window
+                // at desktop coordinates, with the strip we reserved cut out of
+                // its top. The phone shows a quarter-screen float and the user
+                // has no way to make it a phone app again (LauncherActivity,
+                // PhoneKeeper, calls this).
+                //
+                // Windowing mode first: bounds alone leave it a freeform window
+                // that merely fills the screen, and the freeform caption comes
+                // with it. Platforms without setWindowingMode in
+                // WindowContainerTransaction get the bounds, which is what they
+                // had before.
+                int nd = i(a, 1);
+                Wm.TaskRec nt = Wm.taskById(nd, i(a, 2));
+                Rect nativeFull = new Rect(0, 0, Math.max(1, i(a, 3)), Math.max(1, i(a, 4)));
+                Object nwct = Wm.newTransaction();
+                boolean modeSet = true;
+                try {
+                    Wm.setWindowingMode(nwct, nt.token, Wm.MODE_FULLSCREEN);
+                } catch (Throwable e) {
+                    modeSet = false;
+                }
+                Wm.setBounds(nwct, nt.token, nativeFull);
+                Wm.setAppBounds(nwct, nt.token, nativeFull);
+                Wm.removeCaptionInset(nwct, nt.token);
+                Wm.transition(nwct);
+                out.println(modeSet ? "OK" : "OK bounds-only");
                 return;
             }
 

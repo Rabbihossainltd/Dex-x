@@ -128,6 +128,18 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.5 — the phone's screen is the phone's
+
+Reported with a screenshot: an app that is open on the desktop shows up on the phone
+as a **small floating card in the middle of a black screen**, no title bar, and the
+phone's own task switcher underneath. "completely separate devices" — which is what it
+was always supposed to be.
+
+| # | Reported | The cause | Fix |
+| --- | --- | --- | --- |
+| 10 | "desktop a same app open thakle mobile a choto hoye thake" | Android has **one task per app, not one per display**. A task that lives on the desktop keeps its freeform bounds and its reserved caption strip, and any phone-side claim on it — the phone's launcher, a notification, a call, `am start` without a display — moves the *same* task onto the phone with that shape intact. Three of our own paths feed it: `shapeForDesktop`'s freeform mode, the strip we reserve for the caption, and — the worst of the three — `withoutLaunchDisplay`, which rebuilt the failed launch with **the desktop's bounds and WINDOWING_MODE_FREEFORM minus only the display id**, i.e. it deliberately opened a small floating window on the phone. The old repair for this (`CaptionService.releaseFreeformOnPhone`) lives inside the accessibility service, so on a phone that has not bound it (see 0.7.4) it never ran. | Three changes. **`withoutLaunchDisplay` is now plain options** — a launch that cannot go to the desktop opens as a normal full-screen phone app instead of a floating card at desktop coordinates. **The daemon's LAUNCH mints a task of its own** (`-f 0x18000000`, NEW_TASK\|MULTIPLE_TASK) when the app has no window on the desktop yet, so the platform cannot hand the desktop a task the phone is already using — and drops the flag when it is a refocus, so a tap never mints a second copy. **`PhoneKeeper`** — a new, in-process loop with no accessibility dependency — watches the phone's own display through the window daemon and puts any desktop-shaped window of a desktop package back where it belongs: `NATIVE` in the daemon sets WINDOWING_MODE_FULLSCREEN, the full-screen bounds and clears the caption inset in one transaction. |
+| 10 | — | — | `NATIVE` is also the cheap half of the old repair on phones where it did work: it does the un-strip **and** the bounds **and** the mode in one request, where the old path needed three. |
+
 ## v0.7.4 — why the title bars were never there, and why the computer was silent
 
 0.7.3 changed the *layout* of the caption bar and the *storage* of the sound choice.

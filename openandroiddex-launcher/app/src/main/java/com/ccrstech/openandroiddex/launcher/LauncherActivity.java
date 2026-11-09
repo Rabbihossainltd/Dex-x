@@ -1397,14 +1397,23 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
      * framework, it means display -1, and the launch would then have nowhere to go.
      */
     private Bundle withoutLaunchDisplay(Bundle options) {
-        // The bounds come from the last shapeForDesktop rather than from this bundle,
-        // because ActivityOptions.fromBundle is hidden and there is no other way to
-        // read them back. Every caller shapes its options immediately before starting,
-        // on this one thread, so "the last ones asked for" and "this call's" are the
-        // same thing — and without them the window opens wherever the platform feels
-        // like putting it, which is what a person reports as apps appearing in the
-        // corner of the screen.
-        return shapeForDesktop(ActivityOptions.makeBasic(), lastShapedBounds, -1).toBundle();
+        // No display id, NO bounds and NO freeform — because this launch lands
+        // on the PHONE.
+        //
+        // This used to rebuild the same desktop shape minus the display: the
+        // bounds from the last window and WINDOWING_MODE_FREEFORM. A launch the
+        // desktop display refused therefore opened on the phone's own screen as
+        // a small floating window at desktop coordinates — the phone showing a
+        // quarter-screen app with no title bar, which is exactly what was
+        // reported ("desktop a same app open thakle mobile a choto hoye thake").
+        // Plain options open it the way any app opens on a phone: full screen.
+        // It is then pulled onto the desktop by reclaimOntoDesktop below, or, if
+        // the daemon cannot move it, left as a normal phone window — which is
+        // still a window someone can use.
+        //
+        // `options` is deliberately unused now: every field in it describes a
+        // window on the desktop.
+        return ActivityOptions.makeBasic().toBundle();
     }
 
     /** The one refusal the daemon can undo: this display will not take our launches. */
@@ -1448,6 +1457,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     @Override
     protected void onDestroy() {
         CaptionFallback.detach();
+        PhoneKeeper.detach();
         super.onDestroy();
         // Drops the sampler's view references. The gauge lives in the
         // activity's own view tree now, so it goes with the window either way.
@@ -3970,6 +3980,8 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         // sleeps until the accessibility caption reports a problem, then draws
         // the bars itself out of this process (see CaptionFallback).
         CaptionFallback.attach(this);
+        // The phone's own screen keeps phone-shaped windows (see PhoneKeeper).
+        PhoneKeeper.attach(this);
 
         batteryPill = new TextView(this);
         batteryPill.setTextColor(theme.text);
@@ -7226,6 +7238,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
                 + " " + bounds.width() + "x" + bounds.height()
                 + (ownTask ? " [NEW_TASK|MULTIPLE_TASK — no window here yet]"
                            : " [NEW_TASK — refocusing the window already here]"));
+        PhoneKeeper.noteDesktopPackage(this, pkg);
         noteRecent(app.component);
         // Show the taskbar icon immediately — the running broadcast would only confirm
         // it a poll later; the titlebar appears the moment the tracker sees the real

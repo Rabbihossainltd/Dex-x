@@ -380,6 +380,24 @@ final class WmClient {
     }
 
     /**
+     * Put a task back into an ordinary, full-screen window — the phone's own
+     * shape — and take the desktop's caption strip off it.
+     *
+     * <p>The mode change is the part that matters. Bounds alone (what
+     * {@code CaptionService.releaseFreeformOnPhone} does) leaves the task
+     * freeform: it fills the screen, but it keeps the freeform caption, the
+     * resize affordances and, in the phone's task switcher, the look of a
+     * window that does not belong. Setting the windowing mode to fullscreen is
+     * what the platform's own task move would have done had the task been
+     * created here instead of on the desktop.
+     *
+     * @return false when the daemon refused or did not answer
+     */
+    boolean nativeWindow(int displayId, int taskId, int w, int h) {
+        return ok(request("NATIVE " + displayId + " " + taskId + " " + w + " " + h));
+    }
+
+    /**
      * Take a window that opened on the phone and put it on the desktop.
      *
      * The other half of a start this display refused to be named in: the activity is

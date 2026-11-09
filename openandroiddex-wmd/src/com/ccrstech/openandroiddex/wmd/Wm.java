@@ -292,6 +292,23 @@ final class Wm {
         Refl.callSig(wct, "setBounds", new Class<?>[]{tokenClass(), Rect.class}, token, bounds);
     }
 
+    /**
+     * Change a task's windowing mode — the difference between "a freeform
+     * window that happens to be the size of the screen" and "an app the phone
+     * opened", which is what the task switcher, the decoration and the insets
+     * all key off.
+     *
+     * <p>WindowContainerTransaction has carried this since Android 11; the
+     * caller treats a throw as "this platform cannot do it" and settles for the
+     * bounds, which is what the old code did everywhere.
+     */
+    static void setWindowingMode(Object wct, Object token, int mode) {
+        Refl.callSig(wct, "setWindowingMode", new Class<?>[]{tokenClass(), int.class}, token, mode);
+    }
+
+    /** WINDOWING_MODE_FULLSCREEN, from WindowConfiguration. */
+    static final int MODE_FULLSCREEN = 1;
+
     static void setAppBounds(Object wct, Object token, Rect bounds) {
         Refl.callSig(wct, "setAppBounds", new Class<?>[]{tokenClass(), Rect.class}, token, bounds);
     }
