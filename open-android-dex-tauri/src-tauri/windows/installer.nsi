@@ -175,6 +175,13 @@ VIAddVersionKey "LegalTrademarks" "Dex-X"
 
 ; Installer pages, must be ordered as they appear
 ; 1. Welcome Page
+;
+; Dex-X: the welcome page names the publisher in plain words. Windows' own
+; "Unknown publisher" line on the UAC prompt is a code-signing question — it
+; disappears only with a certificate, and this installer has none — so the one
+; page a person actually reads says who made this instead of leaving it blank.
+!define MUI_WELCOMEPAGE_TITLE "Dex-X ${VERSION}"
+!define MUI_WELCOMEPAGE_TEXT "Dex-X turns your phone into a desktop on this computer.$\r$\n$\r$\nPublished by ${MANUFACTURER}.$\r$\n$\r$\nThis wizard installs Dex-X, its launcher for the phone, and the tools it needs. Choose Next to continue."
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
 !insertmacro MUI_PAGE_WELCOME
 

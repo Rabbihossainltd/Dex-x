@@ -9,6 +9,7 @@ import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -65,6 +66,14 @@ final class WmClient {
     private Socket socket;
     private BufferedReader in;
     private PrintWriter out;
+
+    // ── the drag channel: own socket, newest frame wins ─────────────────────
+    private final Object dragLock = new Object();
+    private Socket dragSocket;
+    private BufferedReader dragIn;
+    private PrintWriter dragOut;
+    private String dragCmd;
+    private boolean dragBusy;
 
     WmClient() {
         thread.start();
@@ -224,6 +233,101 @@ final class WmClient {
     boolean resize(int displayId, int taskId, int l, int t, int r, int b, int px) {
         return ok(request("RESIZE " + displayId + " " + taskId + " "
                 + l + " " + t + " " + r + " " + b + " " + px));
+    }
+
+    /**
+     * One frame of a resize gesture — latest wins, on a socket of its own.
+     *
+     * <p>Two things make this different from {@link #resize}, and both are about the
+     * gesture feeling like the pointer rather than like a remote control:
+     *
+     * <ul>
+     *   <li>{@code resize} is the ONE-SHOT path: the daemon animates the change, which is
+     *       right for maximise/restore/snap and wrong for a drag, where a fresh animation
+     *       per frame cancels the last one and the window trails the pointer. DRAG applies
+     *       without a transition (the daemon says so where it handles it).</li>
+     *   <li>The request/reply channel is also carrying the reconcile's poll. A frame that
+     *       has to wait behind one is a frame the window never shows, and the queue grows
+     *       while it does. So a drag frame replaces any frame not yet sent (the newest rect
+     *       is the only one worth sending — the gesture has already moved on), and it
+     *       travels on its own connection so a poll can never sit in front of it.</li>
+     * </ul>
+     */
+    void drag(int displayId, int taskId, int l, int t, int r, int b, int px) {
+        frame("DRAG " + displayId + " " + taskId + " " + l + " " + t + " "
+                + r + " " + b + " " + px);
+    }
+
+    /**
+     * One frame of a MOVE gesture — the same fast channel a resize uses.
+     *
+     * <p>Dragging a window by its title bar was already newest-wins, but it still shared
+     * the request/reply connection with the reconcile's poll, so a poll in flight was a
+     * frame the pointer had already outrun. Same fix as {@link #drag}: last rect wins,
+     * own connection.
+     */
+    void moveFrame(int displayId, int taskId, int x, int y) {
+        frame("MOVE " + displayId + " " + taskId + " " + x + " " + y);
+    }
+
+    /** Queue one gesture frame, replacing any frame not yet sent. */
+    private void frame(String cmd) {
+        synchronized (dragLock) {
+            dragCmd = cmd;
+            if (dragBusy) return;          // the frame in flight wins; this one is the latest
+            dragBusy = true;
+            io.post(this::pumpDrag);
+        }
+    }
+
+    /** Send whatever the newest drag frame is, then stop — one pump at a time. */
+    private void pumpDrag() {
+        for (;;) {
+            String cmd;
+            synchronized (dragLock) {
+                cmd = dragCmd;
+                dragCmd = null;
+                if (cmd == null) {
+                    dragBusy = false;
+                    return;
+                }
+            }
+            try {
+                if (dragOut == null) {
+                    dragSocket = new Socket();
+                    dragSocket.connect(new InetSocketAddress(HOST, PORT), CONNECT_TIMEOUT_MS);
+                    dragSocket.setTcpNoDelay(true);
+                    dragOut = new PrintWriter(dragSocket.getOutputStream(), true);
+                    dragIn = new BufferedReader(
+                            new InputStreamReader(dragSocket.getInputStream(),
+                                    StandardCharsets.UTF_8));
+                }
+                dragOut.println(cmd);
+                // The daemon answers every line; read it so the stream stays framed. The
+                // answer is not acted on: the next frame supersedes this one either way.
+                dragIn.readLine();
+            } catch (Exception e) {
+                closeDrag();               // the next frame reconnects
+            }
+        }
+    }
+
+    private void closeDrag() {
+        try {
+            if (dragIn != null) dragIn.close();
+        } catch (Exception ignored) {
+        }
+        try {
+            if (dragOut != null) dragOut.close();
+        } catch (Exception ignored) {
+        }
+        try {
+            if (dragSocket != null) dragSocket.close();
+        } catch (Exception ignored) {
+        }
+        dragIn = null;
+        dragOut = null;
+        dragSocket = null;
     }
 
     boolean front(int displayId, int taskId) {

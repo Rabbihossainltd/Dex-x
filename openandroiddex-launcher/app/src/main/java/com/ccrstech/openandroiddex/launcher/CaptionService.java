@@ -980,6 +980,13 @@ public final class CaptionService extends AccessibilityService {
         for (WmClient.Task t : live) {
             if (!home.equals(t.pkg)) continue;
             if (t.taskId <= 0) continue;
+            // Asked ONCE per task. removeTask is cheap but not free, and if the
+            // platform ever did relaunch its home on this display we would be
+            // closing the same task every four seconds for the whole session —
+            // a flicker, not a fix. One ask per task id, forever: a fresh task
+            // gets a fresh id and its own ask.
+            if (homesSwept.size() > 8) homesSwept.clear();
+            if (!homesSwept.add(t.taskId)) return;
             boolean gone = wm != null && wm.close(t.taskId);
             DexLog.step("desktop", "the platform's home was on the desktop display (task "
                     + t.taskId + ") — " + (gone ? "closed it" : "could not close it"));
@@ -1005,6 +1012,8 @@ public final class CaptionService extends AccessibilityService {
 
     private String homePkg;
     private long homePkgAt;
+    /** Task ids the platform-home sweep has already acted on (see sweepForeignHome). */
+    private final Set<Integer> homesSwept = new HashSet<>();
 
     private boolean applyTasks(int display, List<WmClient.Task> live) {
         trackDensity(display);
@@ -1815,7 +1824,12 @@ public final class CaptionService extends AccessibilityService {
                     t.right = right;
                     t.bottom = bottom;
                 }
-                wm.post(() -> wm.resize(display, id, left, top, right, bottom, strip));
+                // DRAG, not RESIZE: this is one frame of a gesture, and the
+                // daemon's RESIZE animates — an animation per frame is what made
+                // dragging an edge feel sticky and out of step with the pointer.
+                // DRAG applies the rect without a transition and is newest-wins,
+                // so a slow round trip can only cost a frame, never a backlog.
+                wm.drag(display, id, left, top, right, bottom, strip);
             }
 
             @Override
@@ -2227,7 +2241,9 @@ public final class CaptionService extends AccessibilityService {
                     y = wantY;
                     pending = false;
                 }
-                wm.move(task.displayId, task.taskId, x, y);
+                // The fast channel, not the poll's: a title-bar drag must not
+                // queue behind a LIST the reconcile asked for a moment earlier.
+                wm.moveFrame(task.displayId, task.taskId, x, y);
                 task.left = x;
                 task.top = y;
             }

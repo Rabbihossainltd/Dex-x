@@ -666,6 +666,39 @@ public final class WmDaemon {
                 return;
             }
 
+            case "DRAG": {
+                // "DRAG <displayId> <taskId> <l> <t> <r> <b> <stripPx>" — ONE FRAME
+                // of a resize gesture.
+                //
+                // Byte for byte the same work as RESIZE, minus the one thing that
+                // made dragging stutter: `Wm.transition(wct)`. A transition is an
+                // ANIMATION — the platform animates the window from where it was to
+                // where it now is — and a drag sends a new rect every frame. Each
+                // transition cancels the last and starts its own, so the window
+                // trails the pointer by a whole animation length and the gesture
+                // reads as rubber-banding, worse the faster the drag.
+                //
+                // Drag frames therefore go through applyTransaction, which is what
+                // MOVE below already does and for the same reason. The transition
+                // stays where it belongs: the one-shot jumps (maximise, restore,
+                // snap) that RESIZE serves, which have exactly one edge to animate.
+                Wm.TaskRec t = Wm.taskById(i(a, 1), i(a, 2));
+                Rect want = new Rect(i(a, 3), i(a, 4), i(a, 5), i(a, 6));
+                if (want.isEmpty()) {
+                    out.println("ERR empty bounds rejected");
+                    return;
+                }
+                int strip = a.length > 7 ? i(a, 7) : 0;
+                Rect app = new Rect(want);
+                if (strip > 0) app.top += strip;
+                Object wct = Wm.newTransaction();
+                Wm.setBounds(wct, t.token, want);
+                Wm.setAppBounds(wct, t.token, app);
+                Wm.applyTransaction(wct);
+                out.println("OK");
+                return;
+            }
+
             case "FRONT": {
                 int d = i(a, 1);
                 Wm.TaskRec t = Wm.taskById(d, i(a, 2));

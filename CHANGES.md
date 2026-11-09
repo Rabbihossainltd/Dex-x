@@ -128,6 +128,20 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.10 — gestures that follow the pointer, and a taskbar that stays
+
+| Report | What it was | Fix |
+| --- | --- | --- |
+| **Resizing a window is not smooth** | Every drag frame went through the daemon's `RESIZE`, and `RESIZE` issues `Wm.transition` — a windowing **animation**. One animation per frame, each cancelling the last, is a window that trails the pointer by the length of an animation and rubber-bands the harder you drag. The daemon's own comment on `MOVE` already said a transition is the wrong tool per frame; the resize path never got the message. | A new `DRAG` verb: the same bounds + app-bounds write as `RESIZE`, applied with `applyTransaction` — no animation. `RESIZE` keeps the transition for the one-shots (maximise, restore, snap) where there is one jump to animate. |
+| **…and moving a window stutters too** | Drag frames shared the request/reply connection with the reconcile's `LIST` poll, so a poll in flight was a frame the pointer had already outrun, and frames queued behind it. | Gesture frames (`DRAG`, `MOVE`) now travel on their own socket, newest-wins: a frame not yet sent is replaced by the next one rather than queued. A slow round trip can cost a frame; it can no longer build a backlog. |
+| **The taskbar vanishes when the app drawer opens** | Nothing was covering it — it had **auto-hidden**. Opening the drawer moves the pointer off the bar, the idle timer expires, and the bar slides away to its peek strip. | The drawer pins the taskbar: while it is open, both collapse timers refuse to run, the bar is revealed, and (overlay path) its window is re-added so it stacks above the drawer's scrim. `hideDrawer` unpins. |
+| **Publisher name in the Windows installer** | Set in 0.7.8 — `publisher: "Rabbihossainltd"` becomes the uninstall key's `Publisher`, the setup's `CompanyName` and the app exe's `CompanyName`. | The **welcome page now says it too**: "Published by Rabbihossainltd". Windows' "Unknown publisher" on the UAC prompt is a code-signing question and stays until there is a certificate; the name itself is in every field Windows reads. |
+
+Two things found while re-checking 0.7.9 instead of trusting it:
+
+- `reconcile_audio_session` decided whether a companion was still wanted from a helper that also counted a live **desktop** as "sound is here". Between the decision and the spawn, a desktop alone could pass that check and start a second capture — the exact double-capture the 0.7.9 change exists to remove. Both places now ask the app-window question only.
+- The platform-home sweep is asked once per task id. If a phone ever did relaunch its home on the desktop display, the old loop would close it every four seconds for the whole session.
+
 ## v0.7.9 — five things a working caption bar made visible
 
 With the window daemon finally running, the desktop appeared and the next five reports

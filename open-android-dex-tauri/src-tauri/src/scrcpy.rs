@@ -1981,7 +1981,7 @@ fn reconcile_audio_session(app: &AppHandle, serial: &str) {
     // stop grace). Teardown holds AUDIO_RECONCILE too, so a spawn past a dead
     // desktop would still be caught and stopped — this re-check just keeps
     // that from being a spawn at all when the desktop ended mid-reconcile.
-    let desktop_still_live = sound_shown_here(app, serial);
+    let desktop_still_live = apps_open_here(app, serial);
     if !desktop_still_live {
         log::info!("audio [{serial}] the desktop ended mid-reconcile — no companion");
         return;
@@ -2083,26 +2083,6 @@ static APP_WINDOWS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 fn apps_open_here(app: &AppHandle, serial: &str) -> bool {
     let _ = app;
     APP_WINDOWS.lock().unwrap().iter().any(|s| s == serial)
-}
-
-/// Whether this computer shows anything of `serial`'s: its desktop, or one of its apps.
-#[allow(dead_code)]
-fn sound_shown_here(app: &AppHandle, serial: &str) -> bool {
-    if APP_WINDOWS.lock().unwrap().iter().any(|s| s == serial) {
-        return true;
-    }
-    let state = app.state::<MirrorState>();
-    let map = state.0.lock().unwrap();
-    map.get(&format!("{serial}|desktop"))
-        .map(|s| {
-            s.child
-                .lock()
-                .unwrap()
-                .try_wait()
-                .map(|st| st.is_none())
-                .unwrap_or(false)
-        })
-        .unwrap_or(false)
 }
 
 /// `serial` has app windows open on this computer now, or no longer has

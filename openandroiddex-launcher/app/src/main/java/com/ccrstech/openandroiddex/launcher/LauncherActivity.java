@@ -379,6 +379,18 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     /** The overlay's LayoutParams, kept so the height can be changed in place. */
     private WindowManager.LayoutParams taskbarLp;
     private boolean taskbarHidden;
+    /**
+     * The drawer/Start menu is open, and the taskbar must stay in view for as
+     * long as it is.
+     *
+     * The bar hides itself when the pointer leaves it (auto-hide) — and opening
+     * the drawer is exactly that: the pointer goes to the app list and the idle
+     * timer runs out a second later. That is the whole of "app drawer a gele
+     * taskbargula dekha jai na": nothing was covering it, the bar had simply
+     * slid away, strip and all. While this is set the collapse timers are
+     * refused, so the taskbar is there to come back to when the drawer closes.
+     */
+    private boolean taskbarPinnedByDrawer;
     private boolean taskbarHovered;
 
     private final Runnable collapseTaskbar = this::collapseTaskbarNow;
@@ -579,13 +591,71 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         taskbarView.animate().translationY(0f).setDuration(130).start();
     }
 
+    /**
+     * Keep the taskbar on screen for as long as the drawer is open.
+     *
+     * Called from {@link #showDrawer} / {@link #hideDrawer}. The reveal is not
+     * conditional on auto-hide: a bar someone has just been asked to come back
+     * to should be there whether or not it was hidden when the drawer opened.
+     */
+    private void pinTaskbar() {
+        taskbarPinnedByDrawer = true;
+        handler.removeCallbacks(collapseTaskbar);
+        handler.removeCallbacks(collapseIdle);
+        if (!taskbarOverlay && taskbarView != null && rootFrame != null) {
+            // The in-activity drawer is a full-surface child of the same frame
+            // the bar lives in, so it covers the strip. Moving the bar last
+            // puts it back over the scrim, which is what Windows does with its
+            // own taskbar while Start is open.
+            taskbarView.bringToFront();
+        }
+        if (taskbarOverlay) {
+            revealTaskbar();
+            // …and above the drawer's own window. Both are APPLICATION_OVERLAY,
+            // so the one added last wins, and the drawer is added later by
+            // definition. Without this the Start menu's scrim — which is the
+            // full surface of its window — dims the bar it is meant to sit above.
+            raiseTaskbarOverlay();
+        }
+    }
+
+    private void unpinTaskbar() {
+        if (!taskbarPinnedByDrawer) return;
+        taskbarPinnedByDrawer = false;
+        scheduleTaskbarCollapse();
+    }
+
+    /**
+     * Put the taskbar window back on top of the overlay stack.
+     *
+     * remove + add, because WindowManager has no "bring to front" for an
+     * ordinary window: adding a window puts it above every window of its type,
+     * which is exactly what is needed here. Cheap (twice per drawer open and
+     * close) and state-preserving — the same view, the same LayoutParams.
+     */
+    private void raiseTaskbarOverlay() {
+        if (taskbarHost == null || !taskbarOverlay || taskbarLp == null) return;
+        try {
+            getWindowManager().removeViewImmediate(taskbarHost);
+        } catch (Exception e) {
+            return;                       // not attached: nothing to raise
+        }
+        try {
+            getWindowManager().addView(taskbarHost, taskbarLp);
+        } catch (Exception e) {
+            DexLog.warn("taskbar", "could not raise the taskbar above the drawer", e);
+        }
+    }
+
     private void scheduleTaskbarCollapse() {
+        if (taskbarPinnedByDrawer) return;      // the drawer is open; the bar stays
         if (taskbarHost == null || !taskbarOverlay || !taskbarAutohide()) return;
         handler.removeCallbacks(collapseTaskbar);
         handler.postDelayed(collapseTaskbar, COLLAPSE_DELAY_MS);
     }
 
     private void collapseTaskbarNow() {
+        if (taskbarPinnedByDrawer) return;      // never under an open drawer
         if (taskbarHost == null || !taskbarOverlay || !taskbarAutohide()) return;
         if (taskbarHovered || taskbarHidden) return;
         taskbarHidden = true;
@@ -4321,6 +4391,8 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
             drawerOverlay = false;
             drawerShown = true;
         }
+        // The bar stays up while the drawer is open — see pinTaskbar.
+        pinTaskbar();
         searchField.setText("");
         searchField.requestFocus();
     }
@@ -4364,6 +4436,8 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
             }
             drawer.setVisibility(View.GONE);
         }
+        // …and let the bar go back to hiding itself when it is left alone.
+        unpinTaskbar();
         // put back the chrome a drag hid, so the next open is a clean drawer
         if (drawerPanel != null) drawerPanel.setVisibility(View.VISIBLE);
         // and Start opens on Pinned again, the way Windows does
