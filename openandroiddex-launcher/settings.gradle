@@ -13,8 +13,7 @@ dependencyResolutionManagement {
 }
 rootProject.name = "openandroiddex-launcher"
 include ":app"
-// LinuxOnDroid: the same sources as :app behind a three-component manifest, so
-// the container can ship as an app of its own. Adds `:linuxapp:assembleDebug`
-// and changes nothing about `assembleDebug` — see linuxapp/build.gradle for why
-// it is a module and not a product flavour.
-include ":linuxapp"
+// `:linuxapp` used to be here: LinuxOnDroid, the proot container packaged as an
+// app of its own. It went with the Linux feature (CHANGES.md, v0.7.0), so it is
+// not built any more — and `assembleDebug` builds only :app, which is the APK
+// the PC app ships.
