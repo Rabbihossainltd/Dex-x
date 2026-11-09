@@ -108,7 +108,6 @@ public final class CaptionService extends AccessibilityService {
         return s == null ? -1 : s.desktopDisplayId;
     }
 
-    // ── what a Linux app asks of its window (LinuxWindows), main thread ──
 
     /** Minimise one task, as its caption's minimise does. */
     static void minimiseTask(int taskId) {
@@ -743,18 +742,13 @@ public final class CaptionService extends AccessibilityService {
      * window: it is a normal freeform window and was the one window on the
      * desktop still wearing One UI's own title bar. Settings runs in its own
      * task (see its taskAffinity in the manifest), so the activity name tells
-     * the two apart — and the Linux window is exempted the same way, for the
-     * same reason.
+     * the two apart, and our other windows are exempted the same way.
      */
     private boolean isDesktopTask(WmClient.Task t) {
         return getPackageName().equals(t.pkg)
                 && !SettingsActivity.class.getName().equals(t.activity)
-                && !LinuxActivity.class.getName().equals(t.activity)
-                && !DockerActivity.class.getName().equals(t.activity)
                 && !TaskManagerActivity.class.getName().equals(t.activity)
-                && !FileTransferActivity.class.getName().equals(t.activity)
-                && !LinuxRemoteActivity.class.getName().equals(t.activity)
-                && !LinuxWindowActivity.class.getName().equals(t.activity);
+                && !FileTransferActivity.class.getName().equals(t.activity);
     }
 
     /**
@@ -1100,12 +1094,7 @@ public final class CaptionService extends AccessibilityService {
             Long since = geometrySince.get(t.taskId);
             if (since == null || now - since < GEOMETRY_SETTLE_MS) continue;
             geometrySaved.add(t.taskId);
-            // A Linux window is remembered by its app (its window class):
-            // all of them are one activity, and Firefox should open where
-            // Firefox was, not where the last Linux window was left.
-            String key = LinuxWindowActivity.class.getName().equals(t.activity)
-                    ? LinuxWindows.memoryKeyForTask(t.taskId)
-                    : WindowMemory.keyFor(this, t.pkg, t.activity);
+            String key = WindowMemory.keyFor(this, t.pkg, t.activity);
             if (key != null) {
                 WindowMemory.remember(this, key,
                         new android.graphics.Rect(t.left, t.top, t.right, t.bottom),
@@ -2133,12 +2122,6 @@ public final class CaptionService extends AccessibilityService {
      * (our own Settings window is titled "Settings", not "Open Android DeX").
      */
     private String labelFor(WmClient.Task task) {
-        // A Linux app's window: its own title, which changes as the app goes
-        // (a document's name, a page's) — every one of them is the same activity.
-        if (LinuxWindowActivity.class.getName().equals(task.activity)) {
-            String title = LinuxWindows.titleForTask(task.taskId);
-            if (title != null) return title;
-        }
         PackageManager pm = getPackageManager();
         if (task.activity != null && !task.activity.isEmpty() && !"?".equals(task.activity)) {
             try {

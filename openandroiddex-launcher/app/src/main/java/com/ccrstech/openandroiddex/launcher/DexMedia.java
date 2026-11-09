@@ -198,10 +198,22 @@ final class DexMedia {
     /** The three, in the order Settings lists them. */
     static final String[] AUDIO_MODES = {AUDIO_COMPUTER, AUDIO_BOTH, AUDIO_PHONE};
 
+    /**
+     * Where sound plays. Always both, and deliberately not a preference.
+     *
+     * scrcpy's default DIVERTS the phone's audio to the computer: the handset
+     * goes silent for as long as a desktop is attached, which is how a phone
+     * call stops ringing in your pocket. `--audio-dup` copies instead of
+     * moving, so the PC hears the desktop's media and the phone keeps every
+     * sound it would have made on its own — two devices, each with its own
+     * audio, at the same time. That is the only answer that is never wrong,
+     * so the three-way switch that used to choose between them is gone.
+     *
+     * Android 12 and older cannot duplicate; the PC falls back to moving the
+     * sound and says so in its log.
+     */
     static String audioMode(Context ctx) {
-        if (!DexPrefs.getBool(ctx, DexPrefs.KEY_AUDIO, DexPrefs.DEF_AUDIO)) return AUDIO_PHONE;
-        return DexPrefs.getBool(ctx, DexPrefs.KEY_AUDIO_DUP, DexPrefs.DEF_AUDIO_DUP)
-                ? AUDIO_BOTH : AUDIO_COMPUTER;
+        return AUDIO_BOTH;
     }
 
     /**

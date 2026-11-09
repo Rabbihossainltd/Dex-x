@@ -393,21 +393,12 @@ public class TaskManagerActivity extends Activity {
             }
             final String label;
             final String glyph;
-            if (LinuxActivity.class.getName().equals(activity)) {
-                label = getString(R.string.ln_label);
-                glyph = "🐧";
-            } else if (DockerActivity.class.getName().equals(activity)) {
-                label = getString(R.string.dk_label);
-                glyph = "🐳";
-            } else if (SettingsActivity.class.getName().equals(activity)) {
+            if (SettingsActivity.class.getName().equals(activity)) {
                 label = getString(R.string.settings_label);
                 glyph = "⚙";
             } else if (FileTransferActivity.class.getName().equals(activity)) {
                 label = getString(R.string.ft_label);
                 glyph = "📁";
-            } else if (LinuxRemoteActivity.class.getName().equals(activity)) {
-                label = getString(R.string.rm_label);
-                glyph = "📡";
             } else {
                 continue;
             }
@@ -485,8 +476,7 @@ public class TaskManagerActivity extends Activity {
         // Both route through ACTION_CLOSE_WINDOW rather than a task removal so
         // the window can put its "this stops what is running inside" question
         // in front of the end — see CaptionService's onClose.
-        if (LinuxActivity.class.getName().equals(activity)
-                || DockerActivity.class.getName().equals(activity)) {
+        if (FileTransferActivity.class.getName().equals(activity)) {
             TextView end = new TextView(this);
             end.setText(s(R.string.tm_end_task));
             end.setTextColor(theme.danger);

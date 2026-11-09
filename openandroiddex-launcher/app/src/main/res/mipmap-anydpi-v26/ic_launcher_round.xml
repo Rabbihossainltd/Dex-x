@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- minSdk is 26, so the adaptive icon is the ONLY icon: there is no device
+     this app runs on that would need a legacy PNG fallback. The layers are the
+     mark the project's own brand art draws: a white tile, the Dex-X wordmark. -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@drawable/ic_launcher_background" />
     <foreground android:drawable="@drawable/ic_launcher_foreground" />

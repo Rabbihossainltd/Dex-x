@@ -39,7 +39,7 @@ export function TitleBar({
   return (
     <header data-tauri-drag-region="deep" className="titlebar">
       <div className={`pointer-events-none flex min-w-0 flex-1 items-center gap-2 ${TITLEBAR_LEAD}`}>
-        <img src="/logo.svg" alt="" width={16} height={16} className="shrink-0" draggable={false} />
+        <img src="/logo.png" alt="" width={16} height={16} className="shrink-0" draggable={false} />
         <span className="titlebar-name truncate">Dex-X</span>
       </div>
       {/* The section switch used to live here. With one section it would be a

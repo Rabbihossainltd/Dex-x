@@ -159,28 +159,13 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         final CharSequence label;
         final Drawable icon;
         final ComponentName component;
-        /**
-         * A Linux app, opened as a window of its own on this desktop
-         * (LinuxWindows) rather than as an activity; null for an Android app.
-         * Its component is {@link #LINUX_PKG}/its .desktop id, which keeps it
-         * in recents and on the desktop grid like any other.
-         */
-        final LinuxApps.App linux;
 
         AppEntry(CharSequence label, Drawable icon, ComponentName component) {
-            this(label, icon, component, null);
-        }
-
-        AppEntry(CharSequence label, Drawable icon, ComponentName component, LinuxApps.App linux) {
             this.label = label;
             this.icon = icon;
             this.component = component;
-            this.linux = linux;
         }
     }
-
-    /** The package a Linux app's entry carries: no Android package is called that. */
-    static final String LINUX_PKG = "linux";
 
     /** PC-side enforcer pushes the display's open apps via this broadcast. */
     public static final String ACTION_RUNNING = "com.ccrstech.openandroiddex.launcher.RUNNING";
@@ -269,10 +254,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         return a != null && !a.isDestroyed() && !a.isFinishing() ? a : null;
     }
 
-    /**
-     * The live desktop, for {@link LinuxWindows}: the window a Linux app's
-     * task is started from, on this display, with this display's shape.
-     */
+    /** The live desktop, for the classes that start a window on its display. */
     static LauncherActivity desktopShell() {
         return liveDesktop();
     }
@@ -950,8 +932,6 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
 
     /** Our own windows opened or closed — rebuild their taskbar tiles. */
     private final OwnWindows.Listener ownWindowsListener = this::refreshOpenApps;
-    /** Linux apps' windows come and go, and change their titles and icons. */
-    private final LinuxWindows.Listener linuxWindowsListener = this::refreshOpenApps;
 
     /** Packages CaptionService has minimised — open, but deliberately not visible. */
     private final LinkedHashSet<String> minimisedPkgs = new LinkedHashSet<>();
@@ -1141,9 +1121,6 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
                 public void onDisplayChanged(int displayId) {
                     if (getDisplay() != null && displayId == getDisplay().getDisplayId()) {
                         maybeRebuildForDisplay();
-                        // A desktop that follows its window changes size and, on a
-                        // screen of another scale, density: Linux's windows follow.
-                        LinuxWindows.get(LauncherActivity.this).desktopChanged();
                     }
                 }
             };
@@ -1242,7 +1219,6 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         // in this very process. Registering REPLACES any earlier listener, so a
         // density-driven relaunch of the desktop cannot leave a dead one behind.
         OwnWindows.setListener(ownWindowsListener);
-        LinuxWindows.get(this).addListener(linuxWindowsListener);
         // Same again for the notification listener: it is a service in this
         // very process, so it reports directly rather than over a broadcast.
         // Registered whether or not the grant is in place — the service binds
@@ -1481,7 +1457,6 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         } catch (Exception ignored) {
         }
         OwnWindows.clearListener(ownWindowsListener);
-        LinuxWindows.get(this).removeListener(linuxWindowsListener);
         DexNotifications.clearListener(notificationListener);
         // The call banner is an overlay window, so — like the taskbar and the
         // transfer card — it outlives this activity unless it is taken down
@@ -2332,39 +2307,8 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         // fresh grid (a no-op on the very first pass, before loadApps)
         desktopGrid.reload();
 
-        // Pre-provision Linux once the desktop is up, so the distro is
-        // installed (or visibly installing) before the user ever opens the
-        // tile — the app owns this now, no PC push. Idempotent: it no-ops once
-        // the distro is ready and at this build's feature level.
-        //
-        // POSTED, not called here. This is the busiest moment the launcher
-        // has — the app list, the grid, the taskbar overlay and the caption
-        // service all land in the same second — and anything that arms a
-        // platform deadline against the main thread is asking to miss it.
-        if (Linux.abiSupported()) {
-            // The shared folder exists from the first desktop session, not
-            // from the first Linux launch: someone staging files in My Files
-            // or over USB before ever opening Linux has to find it there. Off
-            // the main thread — it touches the filesystem, and the scan is a
-            // blocking binder round trip.
-            new Thread(() -> {
-                Linux.ensureSharedDir();
-                Linux.scanShared(this);
-            }, "linux-shared-dir").start();
-            root.postDelayed(() -> LinuxService.provision(this), 3000);
-            // Remote access, if the user left it on. A desktop session starts
-            // with the PC force-stopping this package, which takes the tunnel
-            // and every SSH session with it; this is the moment it comes back.
-            // Same delay as the provision, for the same reason.
-            root.postDelayed(() -> LinuxService.remoteResume(this), 3000);
-            // The guest's apps, for the app list: read once the desktop has
-            // settled, then again whenever the drawer opens a while later.
-            root.postDelayed(() -> loadLinuxApps(true), 3500);
-            // Linux apps' windows still open from before this process started.
-            root.postDelayed(() -> {
-                if (!onPhone()) LinuxWindows.get(this).resume();
-            }, 3500);
-        }
+        // (The Linux and Docker pre-provisioning that used to live here went with
+        // the features themselves — see CHANGES.md, v0.7.0.)
     }
 
     private GridView buildAppGrid() {
@@ -3213,31 +3157,12 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     }
 
     /**
-     * The desktop's own tiles: Settings, Linux, Docker where the ABI can run
-     * it, and the Web viewer.
+     * The desktop's own tiles: Settings, and File transfer where there is a
+     * computer on the other end.
      *
      * These are the in-desktop tools, and they exist as tiles precisely because
      * nothing else will list them: loadApps skips our own package, so an app
      * grid built from the launcher intent never contains them.
-     *
-     * A list rather than a row, because both shells show these and neither
-     * shows them the same way — the DeX drawer puts them in a labelled row
-     * above the app list, the Windows 11 Start menu pins them into its grid.
-     *
-     * Two of the tiles are conditional, and for the same kind of reason: an
-     * offer that cannot be honoured is worse than no offer. Docker is absent
-     * where the APK ships no QEMU for the ABI, and File transfer is absent on
-     * the phone's own screen, where the computer whose drives fill its left
-     * pane does not exist.
-     *
-     * Docker sits beside Linux rather than inside it, because it is not a guest
-     * of the Ubuntu container and could never be one: it is a whole virtual
-     * machine of its own (Docker.java has the kernel measurements that force
-     * that). Hidden outright where the APK has no QEMU for the ABI — an offer
-     * that cannot be honoured is worse than no offer. The Web viewer is never
-     * hidden on a device basis: MediaProjection is on every Android this APK
-     * runs on, and the one thing that can be missing (the accessibility
-     * service, for control) is something the window itself says how to fix.
      */
     private List<LinearLayout> systemTiles() {
         List<LinearLayout> tiles = new ArrayList<>();
@@ -3253,20 +3178,10 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         ((TextView) settings.getChildAt(1)).setText(getString(R.string.settings_label));
         tiles.add(settings);
 
-        // Both gated on the ABI: a 32-bit install (armeabi-v7a, see the
-        // launcher's build.gradle) carries neither proot nor QEMU, and a tile
-        // that can only answer "Linux setup failed: unsupported abi" is worse
-        // than no tile.
-        if (Linux.abiSupported()) {
-            tiles.add(glyphTile("🐧", getString(R.string.ln_label),
-                    v -> launchLinux(), this::showLinuxMenu));
-        }
-        if (Docker.abiSupported()) {
-            tiles.add(glyphTile("🐳", getString(R.string.dk_label),
-                    v -> launchDocker(), this::showDockerMenu));
-        }
-        tiles.add(glyphTile("🌐", getString(R.string.wb_label),
-                v -> launchWeb(), this::showWebMenu));
+        // Linux, Docker and the browser viewer used to be three more tiles here.
+        // They are gone: together they were the APK's whole native payload
+        // (QEMU, proot, WebRTC — ~38 MB), and none of them is what the desktop
+        // is for. See CHANGES.md, v0.7.0.
         // Only where a computer made this display. The pane on the left of
         // that window IS the computer's filesystem, and there is no computer
         // when the shell is drawn on the phone's own screen — the same
@@ -3425,11 +3340,6 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         }
     }
 
-    /**
-     * Open the Linux window, centered and freeform. Sized for a usable XFCE
-     * session: the container's display is created at whatever this window
-     * first measures, so opening big is opening sharp.
-     */
     // ── tray: performance gauge ──
 
     /**
@@ -3532,321 +3442,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         }
     }
 
-    /** Right-click / long-press on the Linux tile. */
-    private void showLinuxMenu(View anchor) {
-        android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
-        menu.getMenu().add(0, 1, 0, getString(R.string.ln_label));
-        menu.getMenu().add(0, 2, 1, getString(R.string.ln_shared));
-        // Offered only while the grant is missing, because it is the one thing
-        // that makes files OTHER Android apps put in the folder show up inside
-        // Linux. Nothing here needs it — see Linux.hasAllFiles().
-        if (!Linux.hasAllFiles()) {
-            menu.getMenu().add(0, 3, 2, getString(R.string.ln_shared_grant));
-        }
-        // The way back to the install chooser. Without it that screen is a
-        // one-way door: it is shown once, before the first container exists,
-        // and someone who unticked VS Code to save the download would have no
-        // route to it short of deleting the whole container and starting
-        // again. Offered even before there is a container — the screen is the
-        // first thing an install goes through anyway — but not while Linux is
-        // uninstalled, where provisioning is deliberately inert and the button
-        // would lead nowhere.
-        if (!Linux.isUninstalled(this)) {
-            menu.getMenu().add(0, 6, 3, getString(R.string.ln_apps_menu));
-        }
-        // SSH into this Linux from a computer elsewhere. Offered whether or not
-        // a container exists yet: the window says what is missing and how to
-        // get it, which is more use than an entry that appears later.
-        if (LinuxRemote.available(this)) {
-            menu.getMenu().add(0, 7, 3, getString(R.string.ln_remote_menu));
-        }
-        menu.getMenu().add(0, 4, 4, getString(R.string.ln_reinstall));
-        // Only while there is something to remove. Offering "Uninstall" over a
-        // container that is already gone is an action that would do nothing,
-        // and it is the entry that reads most like it should.
-        if (Linux.isInstalled(this)) {
-            menu.getMenu().add(0, 5, 5, getString(R.string.ln_uninstall));
-        }
-        // One explicit id per branch and NO trailing else. The else used to be
-        // the reinstall, so any item added after it would have dropped the user
-        // straight into a container wipe.
-        menu.setOnMenuItemClickListener(item -> {
-            int id = item.getItemId();
-            if (id == 1) {
-                launchLinux();
-            } else if (id == 2) {
-                openSharedFolder();
-            } else if (id == 3) {
-                requestAllFilesAccess();
-            } else if (id == 4) {
-                confirmLinuxReinstall();
-            } else if (id == 5) {
-                confirmLinuxUninstall();
-            } else if (id == 6) {
-                chooseLinuxApps();
-            } else if (id == 7) {
-                openLinuxRemote();
-            }
-            return true;
-        });
-        menu.show();
-    }
-
-    /**
-     * The Remote access window, freeform on this display like the Linux one.
-     * Its own task and affinity, so it opens beside a live Linux window rather
-     * than replacing what that window shows.
-     */
-    private void openLinuxRemote() {
-        hideDrawer();
-        dismissPopups();
-        if (minimisedActivities.contains(LinuxRemoteActivity.class.getName())) {
-            sendBroadcast(new Intent(ACTION_RESTORE)
-                    .setPackage(getPackageName())
-                    .putExtra("pkg", getPackageName())
-                    .putExtra("activity", LinuxRemoteActivity.class.getName()));
-            return;
-        }
-        Intent intent = new Intent(this, LinuxRemoteActivity.class)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        ActivityOptions opts = shapeForDesktop(
-                ActivityOptions.makeBasic(),
-                desktopWindowRect(LinuxRemoteActivity.class, dp(560), dp(720)));
-        try {
-            startActivity(intent, opts.toBundle());
-        } catch (Exception e) {
-            DexLog.warn("remote", "cannot open the Remote access window", e);
-            Toast.makeText(this, getString(R.string.ln_cannot_open), Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    /**
-     * Reopen the install chooser — which apps go into the container.
-     *
-     * The screen itself lives in the Linux window, because that is where the
-     * install it drives is narrated and because a second copy of it in a dialog
-     * out here would be a second copy to keep true. So this is a start with one
-     * extra on it; LinuxActivity is singleTask, so an open window takes it
-     * through onNewIntent rather than growing a second one.
-     *
-     * The restore comes first for the same reason it does in launchLinux: a
-     * minimised window is not on any display, and starting it without asking
-     * CaptionService to bring it back leaves the chooser on a window nobody can
-     * see.
-     */
-    private void chooseLinuxApps() {
-        hideDrawer();
-        dismissPopups();
-        if (minimisedActivities.contains(LinuxActivity.class.getName())) {
-            sendBroadcast(new Intent(ACTION_RESTORE)
-                    .setPackage(getPackageName())
-                    .putExtra("pkg", getPackageName())
-                    .putExtra("activity", LinuxActivity.class.getName()));
-        }
-        Intent intent = new Intent(this, LinuxActivity.class)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                .putExtra(LinuxActivity.EXTRA_CHOOSE_APPS, true);
-        ActivityOptions opts = shapeForDesktop(
-                ActivityOptions.makeBasic(),
-                desktopWindowRect(LinuxActivity.class, dp(1100), dp(750)));
-        try {
-            startActivity(intent, opts.toBundle());
-        } catch (Exception e) {
-            DexLog.warn("linux", "cannot open the app chooser", e);
-            Toast.makeText(this, getString(R.string.ln_cannot_open), Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    /**
-     * The shared folder, in an Android file manager, as a freeform window on
-     * this display like everything else the desktop launches.
-     *
-     * Named through ExternalStorageProvider rather than as a {@code file://}
-     * path: the launcher holds no storage permission by default (the folder
-     * deliberately needs none), so a file URI would open a manager that then
-     * shows nothing.
-     *
-     * The handler is RESOLVED rather than left implicit, for the reason
-     * TransferHud records: more than one app answers this on a Samsung phone,
-     * and the system chooser — launched into a freeform window on a secondary
-     * display — opens and closes again without ever showing anything. With no
-     * concrete handler we say where the folder is instead of firing an intent
-     * that would vanish.
-     */
-    private void openSharedFolder() {
-        dismissPopups();
-        java.io.File dir = Linux.sharedDir();
-        // A top-level folder on shared storage cannot be created without the
-        // all-files grant, so a failure here has exactly one likely cause and
-        // exactly one useful next step. Offering the grant beats opening a file
-        // manager onto a folder that is not there.
-        if (!Linux.ensureSharedDir() && !Linux.hasAllFiles()) {
-            requestAllFilesAccess();
-            return;
-        }
-        Uri uri = DocumentsContract.buildDocumentUri(
-                "com.android.externalstorage.documents", "primary:" + Linux.SHARED_NAME);
-        Intent intent = new Intent(Intent.ACTION_VIEW)
-                .setDataAndType(uri, DocumentsContract.Document.MIME_TYPE_DIR)
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
-                        | Intent.FLAG_ACTIVITY_NEW_TASK);
-        ComponentName target = null;
-        try {
-            ComponentName fallback = null;
-            for (ResolveInfo ri : getPackageManager().queryIntentActivities(intent, 0)) {
-                if (ri.activityInfo == null) continue;
-                String pkg = ri.activityInfo.packageName;
-                if ("android".equals(pkg)) continue;
-                ComponentName cn = new ComponentName(pkg, ri.activityInfo.name);
-                // NOT the head of the list, unlike TransferHud's version of
-                // this: that intent carries no URI, and this one carries a
-                // document URI that MANAGE_DOCUMENTS protects. We cannot grant
-                // read on a URI we do not own, so handing it to whichever app
-                // happens to answer first opens a window onto nothing. The
-                // documents UI and Samsung's My Files are the two that hold it.
-                if (pkg.contains("documentsui") || pkg.contains("myfiles")) {
-                    target = cn;
-                    break;
-                }
-                if (fallback == null) fallback = cn;
-            }
-            if (target == null) target = fallback;
-        } catch (Exception e) {
-            DexLog.warn("linux", "cannot resolve a file manager for the shared folder", e);
-        }
-        DexLog.step("linux", "open shared folder " + dir + " → "
-                + (target != null ? target.flattenToShortString() : "no handler"));
-        if (target != null) {
-            intent.setComponent(target);
-            ActivityOptions opts = shapeForDesktop(
-                    ActivityOptions.makeBasic(), desktopWindowRect(dp(900), dp(640)));
-            try {
-                startActivity(intent, opts.toBundle());
-                return;
-            } catch (Exception e) {
-                DexLog.warn("linux", "file manager refused the shared folder", e);
-            }
-        }
-        // Nothing would open it — say where it is, which is still actionable.
-        Toast.makeText(this, getString(R.string.ln_shared_where, dir.getAbsolutePath()),
-                Toast.LENGTH_LONG).show();
-    }
-
-    /**
-     * Ask before sending the user to the OS "All files access" screen.
-     *
-     * The dialog, and the reason it has to be there at all, live in
-     * {@link WebFiles#requestAllFiles} — the File transfer window offers the
-     * same grant, and a second copy of that invariant is a second place to
-     * forget it. What stays here is the part only the desktop can do: shaping
-     * the OS screen into a freeform rect on this display.
-     */
-    private void requestAllFilesAccess() {
-        dismissPopups();
-        ActivityOptions opts = shapeForDesktop(
-                ActivityOptions.makeBasic(), desktopWindowRect(dp(820), dp(620)));
-        WebFiles.requestAllFiles(this, opts.toBundle());
-    }
-
-    /**
-     * Wipe the container and install it again from nothing.
-     *
-     * The one repair that has to live OUT here rather than in the Linux window:
-     * the cases that need it — a half-finished install, a guest someone broke
-     * from the inside, a rootfs that will not start — are exactly the ones
-     * where that window never gets far enough to offer anything.
-     */
-    private void confirmLinuxReinstall() {
-        dismissPopups();
-        new android.app.AlertDialog.Builder(this)
-                .setTitle(getString(R.string.ln_reinstall))
-                .setMessage(getString(R.string.ln_reinstall_body))
-                .setNegativeButton(getString(R.string.st_cancel), null)
-                .setPositiveButton(getString(R.string.ln_reinstall_go), (d, w) -> {
-                    LinuxService.reset(this);
-                    Toast.makeText(this, getString(R.string.ln_reinstall_started),
-                            Toast.LENGTH_LONG).show();
-                })
-                .show();
-    }
-
-    /**
-     * Remove the container and leave it removed.
-     *
-     * Deliberately NOT a variant of Reinstall. That one wipes and immediately
-     * downloads again, which is the right answer for a broken container and
-     * the wrong one for someone who wants the ~1.5 GB back. Because the
-     * desktop provisions on every launch, "removed" has to be a state we
-     * remember (Linux's uninstall marker) or the next start would quietly
-     * undo it — opening Linux is what deliberately reverses it.
-     */
-    private void confirmLinuxUninstall() {
-        dismissPopups();
-        new android.app.AlertDialog.Builder(this)
-                .setTitle(getString(R.string.ln_uninstall))
-                .setMessage(getString(R.string.ln_uninstall_body))
-                .setNegativeButton(getString(R.string.st_cancel), null)
-                .setPositiveButton(getString(R.string.ln_uninstall_go), (d, w) -> {
-                    LinuxService.uninstall(this);
-                    Toast.makeText(this, getString(R.string.ln_uninstall_done),
-                            Toast.LENGTH_LONG).show();
-                })
-                .show();
-    }
-
-    private void launchLinux() {
-        hideDrawer();
-        dismissPopups();
-        // Opening Linux is the way back from an uninstall, and the only one:
-        // clearing the marker here — on an explicit request for Linux, never
-        // on the desktop's own provision-on-launch — is what keeps "uninstall"
-        // meaning uninstalled while still leaving the tile working.
-        Linux.setUninstalled(this, false);
-        // Same restore dance as Settings above: our own package has no
-        // taskbar icon, so a minimised window can only come back through
-        // CaptionService — and it must name THIS activity, or a minimised
-        // Settings window would be restored in its place.
-        if (minimisedActivities.contains(LinuxActivity.class.getName())) {
-            sendBroadcast(new Intent(ACTION_RESTORE)
-                    .setPackage(getPackageName())
-                    .putExtra("pkg", getPackageName())
-                    .putExtra("activity", LinuxActivity.class.getName()));
-            return;
-        }
-        Intent intent = new Intent(this, LinuxActivity.class)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        ActivityOptions opts = shapeForDesktop(
-                ActivityOptions.makeBasic(),
-                desktopWindowRect(LinuxActivity.class, dp(1100), dp(750)));
-        try {
-            startActivity(intent, opts.toBundle());
-        } catch (Exception e) {
-            Toast.makeText(this, getString(R.string.ln_cannot_open),
-                    Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    /** Right-click / long-press on the Docker tile. */
-    private void showDockerMenu(View anchor) {
-        android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
-        menu.getMenu().add(0, 1, 0, getString(R.string.dk_label));
-        menu.getMenu().add(0, 2, 1, getString(R.string.dk_reinstall));
-        // One explicit id per branch and no trailing else, for the reason
-        // spelled out on showLinuxMenu: an else that lands on the destructive
-        // item turns every future addition into a wipe.
-        menu.setOnMenuItemClickListener(item -> {
-            int id = item.getItemId();
-            if (id == 1) {
-                launchDocker();
-            } else if (id == 2) {
-                confirmDockerReset();
-            }
-            return true;
-        });
-        menu.show();
-    }
-
-    /**
+                                        /**
      * Throw the Docker machine away and build it again.
      *
      * Out here rather than in the Docker window for the same reason the Linux
@@ -3854,74 +3450,20 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
      * someone broke from the inside, a disk that will not boot — are exactly
      * the ones where that window never gets far enough to offer anything.
      */
-    private void confirmDockerReset() {
-        dismissPopups();
-        new android.app.AlertDialog.Builder(this)
-                .setTitle(getString(R.string.dk_reinstall))
-                .setMessage(getString(R.string.dk_reinstall_body))
-                .setNegativeButton(getString(R.string.st_cancel), null)
-                .setPositiveButton(getString(R.string.dk_reinstall_go), (d, w) -> {
-                    DockerService.reset(this);
-                    Toast.makeText(this, getString(R.string.dk_reinstall_started),
-                            Toast.LENGTH_LONG).show();
-                })
-                .show();
-    }
 
-    /**
-     * Open the Docker window, centered and freeform.
-     *
-     * Deliberately does NOT provision on the way in. The window itself asks
-     * for that once it is on screen, so the ~40 MB of Alpine and the virtual
-     * disk are only fetched by someone who is looking at the progress bar for
-     * them — unlike Linux, which the desktop pre-provisions because its window
-     * is useless until the whole distro is there.
-     */
-    private void launchDocker() {
-        hideDrawer();
-        dismissPopups();
-        // Same restore dance as Settings and Linux: our own package has no
-        // taskbar icon, so a minimised window can only come back through
-        // CaptionService — and it must name THIS activity.
-        if (minimisedActivities.contains(DockerActivity.class.getName())) {
-            sendBroadcast(new Intent(ACTION_RESTORE)
-                    .setPackage(getPackageName())
-                    .putExtra("pkg", getPackageName())
-                    .putExtra("activity", DockerActivity.class.getName()));
-            return;
-        }
-        Intent intent = new Intent(this, DockerActivity.class)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        ActivityOptions opts = shapeForDesktop(ActivityOptions.makeBasic(),
-                desktopWindowRect(DockerActivity.class, dp(900), dp(640)));
-        try {
-            startActivity(intent, opts.toBundle());
-        } catch (Exception e) {
-            Toast.makeText(this, getString(R.string.dk_cannot_open),
-                    Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    /** Right-click / long-press on the File transfer tile. */
+        /** Right-click / long-press on the File transfer tile. */
     private void showFileTransferMenu(View anchor) {
         android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
         menu.getMenu().add(0, 1, 0, getString(R.string.ft_label));
         menu.getMenu().add(0, 2, 1, getString(R.string.ft_menu_downloads));
-        // Only offered when it would do something. The desktop connect already
-        // appop-grants this, so the row is normally absent.
-        if (!WebFiles.hasAllFiles()) {
-            menu.getMenu().add(0, 3, 2, getString(R.string.ft_menu_grant));
-        }
-        // One explicit id per branch and no trailing else, for the reason
-        // spelled out on showLinuxMenu.
+        // One explicit id per branch and no trailing else: an `else` would make
+        // every row added later drop the user into whatever it was.
         menu.setOnMenuItemClickListener(item -> {
             int id = item.getItemId();
             if (id == 1) {
                 launchFileTransfer();
             } else if (id == 2) {
                 openDownloadsFolder();
-            } else if (id == 3) {
-                requestAllFilesAccess();
             }
             return true;
         });
@@ -4009,63 +3551,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         }
     }
 
-    /** Right-click / long-press on the Web viewer tile. */
-    private void showWebMenu(View anchor) {
-        android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
-        menu.getMenu().add(0, 1, 0, getString(R.string.wb_label));
-        boolean running = WebService.isRunning();
-        menu.getMenu().add(0, 2, 1, getString(running ? R.string.wb_stop : R.string.wb_start));
-        // One explicit id per branch and no trailing else, for the reason
-        // spelled out on showLinuxMenu.
-        menu.setOnMenuItemClickListener(item -> {
-            int id = item.getItemId();
-            if (id == 1) {
-                launchWeb();
-            } else if (id == 2) {
-                if (WebService.isRunning()) {
-                    WebService.stop(this);
-                } else {
-                    WebService.start(this);
-                }
-            }
-            return true;
-        });
-        menu.show();
-    }
-
-    /**
-     * Open the Web viewer window, centered and freeform.
-     *
-     * Deliberately does NOT start serving on the way in. Handing a phone's
-     * screen to the network has to be an explicit press, on a window that has
-     * already said what the access code is and who can reach it.
-     */
-    private void launchWeb() {
-        hideDrawer();
-        dismissPopups();
-        // Same restore dance as Settings, Linux and Docker: our own package
-        // has no taskbar icon, so a minimised window can only come back
-        // through CaptionService — and it must name THIS activity.
-        if (minimisedActivities.contains(WebActivity.class.getName())) {
-            sendBroadcast(new Intent(ACTION_RESTORE)
-                    .setPackage(getPackageName())
-                    .putExtra("pkg", getPackageName())
-                    .putExtra("activity", WebActivity.class.getName()));
-            return;
-        }
-        Intent intent = new Intent(this, WebActivity.class)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        ActivityOptions opts = shapeForDesktop(
-                ActivityOptions.makeBasic(),
-                desktopWindowRect(WebActivity.class, dp(760), dp(720)));
-        try {
-            startActivity(intent, opts.toBundle());
-        } catch (Exception e) {
-            Toast.makeText(this, getString(R.string.wb_cannot_open), Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    /** Small square nav button (back / home / recents). */
+            /** Small square nav button (back / home / recents). */
     private TextView navButton(String glyph, String description, View.OnClickListener onClick) {
         TextView btn = new TextView(this);
         btn.setText(glyph);
@@ -4683,8 +4169,6 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
      */
     private void showDrawer() {
         if (drawerShown) return;
-        // Something may have been installed in Linux since the list was read.
-        loadLinuxApps(false);
         // Pinned is a view of the desktop, which the user can have rearranged
         // since the last open. ~16 views; cheaper than watching the grid.
         fillStartPinned();
@@ -6526,7 +6010,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
      * refreshOpenApps) to raise the window instead of starting it.
      */
     private AppEntry resolveOpenPackage(String pkg) {
-        if (pkg == null || pkg.isEmpty() || LINUX_PKG.equals(pkg)) return null;
+        if (pkg == null || pkg.isEmpty()) return null;
         try {
             PackageManager pm = getPackageManager();
             android.content.pm.ApplicationInfo info = pm.getApplicationInfo(pkg, 0);
@@ -6556,9 +6040,6 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         for (AppEntry a : allApps) {
             if (a.component.equals(component)) return a;
         }
-        // Every Linux app shares one package: a removed one is gone, not
-        // another app under the same name.
-        if (LINUX_PKG.equals(component.getPackageName())) return null;
         return findByPackage(component.getPackageName());
     }
 
@@ -6687,24 +6168,15 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         for (String activity : windows) {
             final String label;
             final String glyph;
-            if (LinuxActivity.class.getName().equals(activity)) {
-                label = getString(R.string.ln_label);
-                glyph = "🐧";
-            } else if (SettingsActivity.class.getName().equals(activity)) {
+            if (SettingsActivity.class.getName().equals(activity)) {
                 label = getString(R.string.settings_label);
                 glyph = "⚙"; // gear
-            } else if (DockerActivity.class.getName().equals(activity)) {
-                label = getString(R.string.dk_label);
-                glyph = "🐳";
             } else if (TaskManagerActivity.class.getName().equals(activity)) {
                 label = getString(R.string.tm_title);
                 glyph = "📊";
             } else if (FileTransferActivity.class.getName().equals(activity)) {
                 label = getString(R.string.ft_label);
                 glyph = "📁";
-            } else if (LinuxRemoteActivity.class.getName().equals(activity)) {
-                label = getString(R.string.rm_label);
-                glyph = "📡";
             } else {
                 continue;
             }
@@ -6721,16 +6193,10 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
             // so one click handler covers restore and raise.
             final String target = activity;
             item.setOnClickListener(v -> {
-                if (LinuxActivity.class.getName().equals(target)) {
-                    launchLinux();
-                } else if (DockerActivity.class.getName().equals(target)) {
-                    launchDocker();
-                } else if (TaskManagerActivity.class.getName().equals(target)) {
+                if (TaskManagerActivity.class.getName().equals(target)) {
                     launchTaskManager();
                 } else if (FileTransferActivity.class.getName().equals(target)) {
                     launchFileTransfer();
-                } else if (LinuxRemoteActivity.class.getName().equals(target)) {
-                    openLinuxRemote();
                 } else {
                     launchSettings();
                 }
@@ -6738,100 +6204,10 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
             openAppsRow.addView(item, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         }
-        addLinuxWindowTiles();
     }
 
-    /**
-     * One tile per Linux app window (LinuxWindows), with the window's own icon
-     * and title: they are separate tasks of our own package, so the PC's
-     * running list cannot name them any more than it can our other windows.
-     * A dialog over another window gets no tile of its own, as on any desktop.
-     */
-    private void addLinuxWindowTiles() {
-        LinuxWindows lw = LinuxWindows.get(this);
-        for (LinuxWindows.Entry e : lw.taskbar()) {
-            ImageView icon = new ImageView(this);
-            if (e.icon != null) {
-                icon.setImageBitmap(e.icon);
-            } else {
-                icon.setImageResource(R.mipmap.ic_linux);
-            }
-            icon.setContentDescription(e.title());
-            LinearLayout item = taskbarTile(icon);
-            item.setTooltipText(e.title());
-            final int task = e.taskId;
-            item.setOnClickListener(v -> lw.raiseTask(task));
-            item.setOnContextClickListener(v -> {
-                showLinuxWindowMenu(v, task);
-                return true;
-            });
-            item.setOnLongClickListener(v -> {
-                showLinuxWindowMenu(v, task);
-                return true;
-            });
-            openAppsRow.addView(item, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        }
-    }
 
-    private void showLinuxWindowMenu(View anchor, int task) {
-        android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
-        menu.getMenu().add(0, 1, 0, getString(R.string.lx_maximize_restore));
-        menu.getMenu().add(0, 2, 1, getString(R.string.lw_close_window));
-        menu.setOnMenuItemClickListener(item -> {
-            if (item.getItemId() == 1) {
-                CaptionService.maximiseTask(task, !CaptionService.maximisedTask(task));
-            } else {
-                LinuxWindows.closeTask(task);
-            }
-            return true;
-        });
-        menu.show();
-    }
-
-    /**
-     * Linux apps join the app list where their windows can open: a desktop
-     * display, a container that is installed and ready, an ABI that runs it.
-     */
-    private boolean linuxAppsWanted() {
-        return Linux.abiSupported() && !onPhone() && Linux.isInstalled(this)
-                && "ready".equals(Linux.readStatus(this).phase);
-    }
-
-    /** When the guest's apps were last read; they change only when something is installed in there. */
-    private long linuxAppsReadAt;
-
-    /** Read the guest's apps again, off the main thread, and join them to the list when done. */
-    private void loadLinuxApps(boolean force) {
-        if (!linuxAppsWanted()) return;
-        long now = SystemClock.uptimeMillis();
-        if (!force && linuxAppsReadAt != 0 && now - linuxAppsReadAt < 120_000) return;
-        linuxAppsReadAt = now;
-        LinuxWindows.get(this).loadApps(() -> {
-            if (!isDestroyed()) loadApps();
-        });
-    }
-
-    /**
-     * A Linux app's icon, with the desktop's Linux mark in its corner — the
-     * same app is often on the phone too, and the two open very different
-     * windows. One without an icon of its own gets the mark alone.
-     */
-    private Drawable linuxIcon(android.graphics.Bitmap bitmap) {
-        Drawable mark = getDrawable(R.mipmap.ic_linux);
-        if (bitmap == null) return mark;
-        Drawable base = new android.graphics.drawable.BitmapDrawable(getResources(), bitmap);
-        android.graphics.drawable.LayerDrawable layers =
-                new android.graphics.drawable.LayerDrawable(new Drawable[]{base, mark});
-        int side = dp(iconDp());
-        int badge = Math.round(side * 0.42f);
-        layers.setLayerSize(0, side, side);
-        layers.setLayerSize(1, badge, badge);
-        layers.setLayerGravity(1, Gravity.END | Gravity.BOTTOM);
-        return layers;
-    }
-
-    private void showTaskbarAppMenu(View anchor, AppEntry app) {
+            private void showTaskbarAppMenu(View anchor, AppEntry app) {
         android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
         menu.getMenu().add(0, 1, 0, getString(R.string.lx_maximize_restore));
         menu.getMenu().add(0, 2, 1, getString(R.string.lx_close_app));
@@ -7384,16 +6760,6 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
                     ri.loadIcon(pm),
                     new ComponentName(ri.activityInfo.packageName, ri.activityInfo.name)));
         }
-        // Linux apps beside the Android ones, each opening as a window of its
-        // own on this desktop. The list is read off the main thread
-        // (loadLinuxApps) and simply joins whenever this runs next.
-        if (linuxAppsWanted()) {
-            LinuxWindows lw = LinuxWindows.get(this);
-            for (LinuxApps.App a : lw.apps()) {
-                allApps.add(new AppEntry(a.name, linuxIcon(lw.appIcon(a)),
-                        new ComponentName(LINUX_PKG, a.id), a));
-            }
-        }
         allApps.sort((a, b) -> a.label.toString().compareToIgnoreCase(b.label.toString()));
         filter("");
         refreshOpenApps();
@@ -7457,14 +6823,6 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     void launch(AppEntry app) {
         hideDrawer();
         dismissPopups();
-        if (app.linux != null) {
-            // Every launch is a new window, as running the program again would
-            // be on any desktop; the app decides whether it is a second one.
-            noteRecent(app.component);
-            LinuxWindows.get(this).launch(app.linux);
-            Toast.makeText(this, getString(R.string.lw_opening, app.label), Toast.LENGTH_SHORT).show();
-            return;
-        }
         // A minimised app is already running; it just needs un-hiding. `am start` does
         // NOT clear the hidden flag — measured: the task stays visible=false and the
         // click appears to do nothing — so ask CaptionService, which owns the window

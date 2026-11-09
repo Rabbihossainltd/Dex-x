@@ -122,28 +122,56 @@ public class ConnectActivity extends android.app.Activity {
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(theme.windowBg());
 
+        // A scrolling column: on a short screen (or a large font) the status,
+        // both buttons and the About block do not fit, and a screen whose
+        // bottom is cut off on a phone with no scroll is a screen whose last
+        // row is unreachable.
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setVerticalScrollBarEnabled(false);
+
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setGravity(Gravity.CENTER_HORIZONTAL);
         int pad = dp(26);
         col.setPadding(pad, pad, pad, pad);
 
+        // The mark itself — the project's own wordmark, the same art as the
+        // app icon, on the white tile it was drawn on.
         ImageView icon = new ImageView(this);
         icon.setImageResource(R.mipmap.ic_launcher);
-        col.addView(icon, new LinearLayout.LayoutParams(dp(64), dp(64)));
+        icon.setContentDescription("Dex-X");
+        col.addView(icon, new LinearLayout.LayoutParams(dp(84), dp(84)));
 
-        TextView title = new TextView(this);
-        title.setText("Dex-X");
-        title.setTextColor(theme.text);
-        title.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(24));
-        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        title.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
+        // ── the status, as the screen's headline ──
+        // This is the one thing the app is for, so it is not a line inside a
+        // card any more: it is the sentence you see first, in the accent
+        // colour that means "connected" and in grey when it does not. The card
+        // below it carries the detail and the one button.
+
+        // ── the status, big, above the card ──
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams headLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        titleLp.topMargin = dp(14);
-        col.addView(title, titleLp);
+        headLp.topMargin = dp(18);
+        col.addView(head, headLp);
 
-        // ── the status card ──
+        dot = new View(this);
+        GradientDrawable dotBg = new GradientDrawable();
+        dotBg.setShape(GradientDrawable.OVAL);
+        dot.setBackground(dotBg);
+        LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dp(12), dp(12));
+        dotLp.rightMargin = dp(10);
+        head.addView(dot, dotLp);
+
+        status = new TextView(this);
+        status.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(28));
+        status.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        head.addView(status);
+
+        // ── the card under it: the detail and the one button ──
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -157,24 +185,6 @@ public class ConnectActivity extends android.app.Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         cardLp.topMargin = dp(26);
         col.addView(card, cardLp);
-
-        LinearLayout head = new LinearLayout(this);
-        head.setOrientation(LinearLayout.HORIZONTAL);
-        head.setGravity(Gravity.CENTER_VERTICAL);
-        card.addView(head);
-
-        dot = new View(this);
-        GradientDrawable dotBg = new GradientDrawable();
-        dotBg.setShape(GradientDrawable.OVAL);
-        dot.setBackground(dotBg);
-        LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dp(10), dp(10));
-        dotLp.rightMargin = dp(9);
-        head.addView(dot, dotLp);
-
-        status = new TextView(this);
-        status.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(16));
-        status.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        head.addView(status);
 
         detail = new TextView(this);
         detail.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(13));
@@ -203,17 +213,97 @@ public class ConnectActivity extends android.app.Activity {
         actionLp.gravity = Gravity.CENTER_HORIZONTAL;
         card.addView(action, actionLp);
 
-        FrameLayout wrap = new FrameLayout(this);
-        FrameLayout.LayoutParams colLp = new FrameLayout.LayoutParams(
-                Math.min(dp(430), ViewGroup.LayoutParams.MATCH_PARENT),
-                ViewGroup.LayoutParams.WRAP_CONTENT);
-        colLp.gravity = Gravity.CENTER;
-        wrap.addView(col, colLp);
-        root.addView(wrap, new FrameLayout.LayoutParams(
+        // ── About ──
+        // Who made this, where to find them, and what the licences say. Part of
+        // the same scrolling column, under everything else, so it is there when
+        // someone looks for it and out of the way when they do not.
+        col.addView(about(), aboutParams());
+
+        scroll.addView(col);
+        root.addView(scroll, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         render();
         return root;
+    }
+
+    /** The build this screen belongs to, from the manifest — never a literal. */
+    private String versionName() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /**
+     * The About block: the author, the site, and the two facts a sideloaded app
+     * owes the person who installed it.
+     *
+     * Deliberately plain text and one link. This screen exists for one question
+     * and one action; About is where someone goes when they already know that,
+     * and every row added here is a row between them and Disconnect.
+     */
+    private View about() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER_HORIZONTAL);
+        int p = dp(16);
+        box.setPadding(p, p, p, p);
+
+        TextView made = new TextView(this);
+        made.setText(getString(R.string.cx_about_made));
+        made.setTextColor(theme.textDim);
+        made.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(12));
+        made.setGravity(Gravity.CENTER);
+        box.addView(made);
+
+        TextView author = new TextView(this);
+        author.setText(getString(R.string.cx_about_author));
+        author.setTextColor(theme.text);
+        author.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(14));
+        author.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        author.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams authorLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        authorLp.topMargin = dp(3);
+        box.addView(author, authorLp);
+
+        TextView site = new TextView(this);
+        site.setText(getString(R.string.cx_about_site));
+        site.setTextColor(theme.accent);
+        site.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(13));
+        site.setGravity(Gravity.CENTER);
+        site.setPadding(0, dp(6), 0, dp(2));
+        site.setOnClickListener(v -> {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW,
+                        android.net.Uri.parse(getString(R.string.cx_about_site_url))));
+            } catch (Exception ignored) {
+                // No browser on a locked-down phone: the address is on screen anyway.
+            }
+        });
+        box.addView(site);
+
+        TextView licence = new TextView(this);
+        licence.setText(getString(R.string.cx_about_licence, versionName()));
+        licence.setTextColor(theme.textFaint);
+        licence.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(11));
+        licence.setGravity(Gravity.CENTER);
+        licence.setLineSpacing(dp(2), 1f);
+        LinearLayout.LayoutParams licenceLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        licenceLp.topMargin = dp(8);
+        box.addView(licence, licenceLp);
+        return box;
+    }
+
+    /** The About block's place in the column: under everything, never squashed. */
+    private LinearLayout.LayoutParams aboutParams() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(18);
+        return lp;
     }
 
     /** One pass over the beacon: connected or not, and what to say about it. */

@@ -195,6 +195,14 @@
     <!-- The taskbar's tile for an app with no launcher activity: the click raises
          the window it already has, and this is what it says if the window is gone. -->
     <string name="wb_not_running">%1$s is not running any more</string>
+    <!-- About, on the app screen. The author and the site are the project's
+         own (rabbihossainltd.online); the licence line is what a GPL-3.0 build
+         owes the person who installed it. -->
+    <string name="cx_about_made">Made by</string>
+    <string name="cx_about_author">MD Rabbi Hossain</string>
+    <string name="cx_about_site">rabbihossainltd.online</string>
+    <string name="cx_about_site_url">https://rabbihossainltd.online</string>
+    <string name="cx_about_licence">Dex-X %1$s\nFree software under the GNU GPL v3. Built on open-android-dex; the original authors are credited in NOTICE.md.</string>
     <string name="lx_snap_title">Snap this window to</string>
     <string name="lx_snap_left">Left half</string>
     <string name="lx_snap_right">Right half</string>

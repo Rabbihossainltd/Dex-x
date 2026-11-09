@@ -75,6 +75,30 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.0 — the screen, the mark, and 35 MB of things nobody used
+
+| # | Asked for | What it took |
+| --- | --- | --- |
+| 1 | The status on the phone should be its own thing, not a line inside the instructions card — plus an About block | The status is the screen's **headline** now (28 sp, with its dot), and the card under it holds only the detail and the button. About sits below both: made by **MD Rabbi Hossain**, the site, the version, and the licence. |
+| 2 | A new logo, on the PC and on the phone | The mark is drawn once (`brand-wordmark.png`, cut out of the supplied art) and every surface is generated from it: the Windows/macOS/Linux icons (`npx tauri icon`), the phone's adaptive icon (white tile + wordmark), the titlebar's 16 px X, `doc/img/logo.png` and the window icon. |
+| 4 | Sound: the desktop's on the PC, the phone's on the phone, at the same time — and no audio-source switch in the app | `DexMedia.audioMode` is now always both (`--audio-source=playback --audio-dup`): scrcpy copies the phone's audio instead of **diverting** it, so the handset keeps every sound it makes while the PC plays the desktop's. The three-way "Where sound plays" card is gone from Settings. |
+| 6 | Make the phone app smaller; delete the files of the features that were removed | **36 MB → 0.85 MB.** The Linux container, Docker, the phone's remote access and the browser viewer are gone, and with them: `jniLibs/` (QEMU 20 MB + dexremote 8 MB + proot 0.2 MB per ABI), `assets/linux`, `assets/docker`, `assets/web`, and the WebRTC SDK — whose `libjingle_peerconnection_so` was 16 MB across three ABIs. 43 Java files and four manifest components went with them. |
+| 11 | Clean the workspace | Every old clone, release folder, downloaded artifact and unpacked APK is deleted; the working tree is a fresh clone. |
+
+### Also
+
+* The PC's font/label for the app is unchanged, but the **icon** is the new mark everywhere, including the taskbar and the installer.
+* Rebuilt the phone app's About line so the version is read from the manifest, never typed twice.
+
+### Not in this build (next)
+
+* QR pairing (EXE shows a code, the phone scans it).
+* Physical-keyboard behaviour and FLAG_SECURE screens — both need the phone's own logs.
+* In-app update prompt.
+* Windows-feel extras, desktop-mode apps, and the "separate device" identity.
+
+---
+
 ## Next, in order
 
 1. **Taskbar auto-hide with hover reveal** — what the reporter of the taskbar

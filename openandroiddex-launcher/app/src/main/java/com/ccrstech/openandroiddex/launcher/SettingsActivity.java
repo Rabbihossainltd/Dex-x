@@ -410,8 +410,7 @@ public class SettingsActivity extends Activity {
                 R.string.st_gesture_3right, R.string.st_gesture_3tap}));
         navs.add(new Nav(SEC_STREAM, R.string.st_nav_stream, R.string.st_nav_stream_sub,
                 "🎞", 0xFFf59e0b, new int[]{R.string.st_resolution, R.string.st_codec,
-                R.string.st_encoder, R.string.st_bitrate, R.string.st_fps,
-                R.string.st_audio_output}));
+                R.string.st_encoder, R.string.st_bitrate, R.string.st_fps}));
         navs.add(new Nav(SEC_CLIPBOARD, R.string.st_nav_clipboard, R.string.st_nav_clipboard_sub,
                 "📋", 0xFF4ade80, new int[]{R.string.st_clip_sync, R.string.st_clip_current,
                 R.string.st_clip_history}));
@@ -3047,38 +3046,14 @@ public class SettingsActivity extends Activity {
                     });
         }
 
-        // Where sound plays. A three-way choice rather than the on/off switch
-        // this used to be, because the off state was never the interesting one:
-        // scrcpy's default DIVERTS the phone's audio to the computer instead of
-        // copying it, so the handset goes silent and there was no way to ask
-        // for both. The middle option is that missing answer. The same control
-        // is in the taskbar's quick settings, which is where someone hunting
-        // for missing sound actually looks.
-        LinearLayout audioCard = card(body);
-        cardHeader(audioCard, s(R.string.st_audio_output));
-        String mode = DexMedia.audioMode(this);
-        String[][] modes = {
-                {DexMedia.AUDIO_COMPUTER, s(R.string.lx_audio_computer),
-                        s(R.string.st_audio_computer_sub)},
-                {DexMedia.AUDIO_BOTH, s(R.string.lx_audio_both),
-                        s(R.string.st_audio_both_sub)},
-                {DexMedia.AUDIO_PHONE, s(R.string.lx_audio_phone),
-                        s(R.string.st_audio_phone_sub)},
-        };
-        for (String[] entry : modes) {
-            choiceRow(audioCard, null, entry[1], entry[2], entry[0].equals(mode), () -> {
-                // Writes both underlying keys and pushes both to the PC — see
-                // DexMedia.setAudioMode. NOT pcConfig, which is one key.
-                DexMedia.setAudioMode(this, entry[0]);
-                showSection(SEC_STREAM, false);
-            });
-        }
-        // The one exception to the restart footer below: audio rides its own
-        // scrcpy process on the PC, which is cycled the moment the change
-        // arrives. Said here because the footer's blanket claim is otherwise
-        // a reason to restart for nothing.
-        note(body, s(R.string.st_audio_live_note));
-
+        // Sound is not a setting any more. It used to be a three-way choice
+        // here (computer / both / phone), and the reason it is gone is the
+        // answer people actually wanted: the phone keeps its own sound and the
+        // computer plays it too, so a call rings on the handset while the
+        // desktop's media plays on the PC. That is what the desktop now does,
+        // always — see DexMedia.audioMode, which no longer reads a preference.
+        // A choice with one right answer is a question with no purpose, and the
+        // wrong answer here (computer) is the one that makes the phone silent.
         restartFooter(body);
     }
 

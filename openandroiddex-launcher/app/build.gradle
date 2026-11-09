@@ -21,8 +21,8 @@ android {
         // finding a stale one meant pulling base.apk off the device and reading
         // its manifest. Keep these in step with open-android-dex-tauri/
         // package.json when changing them by hand.
-        versionCode 600
-        versionName "0.6.0"
+        versionCode 700
+        versionName "0.7.0"
 
         // armeabi-v7a is here for the desktop, not for Linux or Docker. Plenty
         // of phones run 32-bit Android on a 64-bit chip (Galaxy A13, Redmi 9A,
@@ -153,7 +153,11 @@ android {
 // three this APK ships. That is the price of reaching a phone that has no
 // inbound route at all — see doc/web-viewer.md.
 dependencies {
-    implementation 'io.github.webrtc-sdk:android:144.7559.12'
+    // Nothing. The only third-party dependency was the WebRTC SDK, for the Web
+    // viewer — see Web.java for why that feature left. Dropping it took ~16 MB
+    // of native code (libjingle_peerconnection_so, one per ABI) out of the APK,
+    // and the APK is bundled inside the Windows installer, so it is also 16 MB
+    // off the download.
 }
 
 // Turns `release` above into a signable build type when the release key is in

@@ -99,15 +99,12 @@ final class OwnWindows {
      * and the computer's "Close the front app" (LauncherActivity's "close").
      */
     static boolean askToClose(Context ctx, int taskId, String activity) {
-        if (LinuxActivity.class.getName().equals(activity)
-                || DockerActivity.class.getName().equals(activity)
-                || FileTransferActivity.class.getName().equals(activity)) {
+        if (FileTransferActivity.class.getName().equals(activity)) {
             ctx.sendBroadcast(new Intent(LauncherActivity.ACTION_CLOSE_WINDOW)
                     .setPackage(ctx.getPackageName())
                     .putExtra("activity", activity));
             return true;
         }
-        return LinuxWindowActivity.class.getName().equals(activity)
-                && LinuxWindows.closeTask(taskId);
+        return false;
     }
 }

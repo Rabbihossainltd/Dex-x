@@ -923,7 +923,7 @@ export default function App() {
             </MenuItem>
             {version && (
               <p className="flex items-center gap-2 px-2.5 pb-1 pt-1.5 text-[11px] text-[var(--ink-3)]">
-                <img src="/logo.svg" alt="" width={14} height={14} draggable={false} />
+                <img src="/logo.png" alt="" width={14} height={14} draggable={false} />
                 Dex-X {version}
               </p>
             )}
