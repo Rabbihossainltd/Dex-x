@@ -265,8 +265,11 @@ jobs:
           $targets = @("dist/Dex-X-windows-x64-setup.exe", "portable/Dex-X.exe")
           foreach ($f in $targets) {
             if (-not (Test-Path $f)) { continue }
-            $sig = Set-AuthenticodeSignature -FilePath $f -Certificate $cert `
-              -HashAlgorithm SHA256 -TimestampServer "http://timestamp.digicert.com"
+            # No timestamp server: Set-AuthenticodeSignature blocks for ever when
+            # the RFC 3161 endpoint is unreachable from the runner, and a signature
+            # without a timestamp is still a signature — it just expires with the
+            # certificate instead of outliving it.
+            $sig = Set-AuthenticodeSignature -FilePath $f -Certificate $cert -HashAlgorithm SHA256
             if ($sig.Status -ne "Valid") {
               Write-Host "::warning::signature on $f is $($sig.Status): $($sig.StatusMessage)"
             } else {
