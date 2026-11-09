@@ -1894,7 +1894,11 @@ fn reconcile_audio_session(app: &AppHandle, serial: &str) {
     // their own; without either there is nothing to keep silent-but-streaming,
     // and a leftover companion would divert the phone's sound to a computer
     // showing nothing.
-    let desktop_live = sound_shown_here(app, serial);
+    // A desktop carries its own sound now (start_mirror), so a companion is
+    // only ever needed for a phone whose apps are open in windows of their
+    // own — the one case where nothing else of ours is attached to the
+    // device's audio at all.
+    let desktop_live = apps_open_here(app, serial);
     let mut want = desktop_live && forward;
 
     if want {
@@ -2056,7 +2060,7 @@ fn watch_audio_companion(app: &AppHandle, serial: &str, pid: u32) {
         );
         let _ = stop_mirror(app.clone(), key.clone());
         let _guard = audio_lock();
-        if !sound_shown_here(&app, &serial) {
+        if !apps_open_here(&app, &serial) {
             return;
         }
         match start_mirror(app.clone(), audio_companion_options(&serial, false)) {
@@ -2074,7 +2078,15 @@ fn watch_audio_companion(app: &AppHandle, serial: &str, pid: u32) {
 /// plays" choice.
 static APP_WINDOWS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
+/// Whether `serial` has app windows open on this computer — the only thing that
+/// still needs an audio companion (a desktop carries its own sound).
+fn apps_open_here(app: &AppHandle, serial: &str) -> bool {
+    let _ = app;
+    APP_WINDOWS.lock().unwrap().iter().any(|s| s == serial)
+}
+
 /// Whether this computer shows anything of `serial`'s: its desktop, or one of its apps.
+#[allow(dead_code)]
 fn sound_shown_here(app: &AppHandle, serial: &str) -> bool {
     if APP_WINDOWS.lock().unwrap().iter().any(|s| s == serial) {
         return true;
@@ -4430,10 +4442,9 @@ fn monitor(
                                 intentional: false,
                             },
                         );
-                        // The audio companion has no reconnect of its own — it
-                        // died with the cable. A desktop that just came back
-                        // brings it back too.
-                        if opts.new_display.is_some() && opts.app_package.is_none() {
+                        // A reconnected desktop carries its own sound (see
+                        // start_mirror) — there is no companion to bring back.
+                        if opts.app_package.is_some() {
                             reconcile_audio_session_bg(&app, &opts.serial);
                         }
                         continue;
@@ -4754,6 +4765,43 @@ pub fn start_mirror(app: AppHandle, mut options: MirrorOptions) -> Result<Sessio
     let remembered = reopen_where_it_was(&app, &mut options);
     // desktop displays are born at the user's chosen density — no zoom flash
     apply_stored_density(&app, &mut options);
+    // ── sound and the pointer, decided here and not by the window that asked ──
+    //
+    // Both have an Android floor, and asking past it does not degrade the
+    // session: scrcpy exits on its own command line, half a second in, with the
+    // reason in a log nobody reads.
+    //
+    // The desktop now carries its OWN sound (`--audio-source=playback
+    // --audio-dup` on the video session). It used to be a separate `--no-video`
+    // companion — a second process that could die a second after starting, and
+    // whose only trace was a line in the log: "there is no sound on the
+    // computer", with nothing to see anywhere. A session cannot silently miss
+    // its own audio; it either answers or it does not start.
+    if options.audio && options.audio_playback {
+        match device_sdk(&app, &options.serial) {
+            Some(sdk) if sdk < 30 => {
+                log::warn!(
+                    "{}: Android {sdk} — scrcpy cannot forward audio there, so the sound \
+                     stays on the phone",
+                    options.serial
+                );
+                options.audio = false;
+                options.audio_playback = false;
+            }
+            Some(sdk) if sdk < 33 => {
+                // `--audio-dup` is Android 13+. Without it playback capture
+                // DIVERTS: the computer gets the sound and the phone goes
+                // silent. Still the desktop's sound, not both — say which.
+                log::info!(
+                    "{}: Android {sdk} — sound moves to this computer (playing on both \
+                     needs 13)",
+                    options.serial
+                );
+                options.audio_playback = false;
+            }
+            _ => {}
+        }
+    }
     let key = options.session_key();
     log::info!("── start session [{key}] ──");
     log::info!(
@@ -4838,13 +4886,9 @@ pub fn start_mirror(app: AppHandle, mut options: MirrorOptions) -> Result<Sessio
             )
         });
 
-    // A desktop brings its sound along: the audio companion is spawned (or
-    // not — "phone only") to match the stored choice. On a thread, because
-    // the reconcile asks the phone its API level and this command is on the
-    // launch pipeline's critical path.
-    if options.new_display.is_some() && options.app_package.is_none() && !options.audio_only {
-        reconcile_audio_session_bg(&app, &options.serial);
-    }
+    // No companion for a desktop: its sound is on the very session above
+    // (`--audio-source=playback --audio-dup`). One owner, and it is the process
+    // the user is already watching.
 
     let info = SessionInfo {
         session_key: key,

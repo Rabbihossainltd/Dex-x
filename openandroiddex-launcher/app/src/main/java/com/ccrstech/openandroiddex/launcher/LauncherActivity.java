@@ -466,13 +466,27 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     private void syncNavCluster() {
         if (navCluster == null) return;
         boolean platformBar = !onPhone() && bottomSystemInset() > dp(6);
-        int want = platformBar ? View.GONE : View.VISIBLE;
+        // A desktop has NO navigation bar — not the platform's, and not ours.
+        //
+        // This used to draw our own three keys whenever the platform's bar was
+        // absent, which is the report that came back twice: the phone's
+        // navigation buttons sitting under the taskbar. Windows has no such
+        // strip, and the desktop does not need one — every window carries
+        // — □ ✕, and the taskbar carries Start and the open apps.
+        //
+        // The phone's own dock keeps its keys: there is no taskbar there, and
+        // Back is the way out of the drawer.
+        int want = onPhone() ? View.VISIBLE : View.GONE;
         if (navCluster.getVisibility() != want) {
             navCluster.setVisibility(want);
-            DexLog.step("taskbar", platformBar
-                    ? "platform navigation bar is on screen — hiding ours"
-                    : "no platform navigation bar — drawing our nav keys");
+            DexLog.step("taskbar", onPhone()
+                    ? "phone dock — drawing our nav keys"
+                    : "desktop — no navigation bar of ours" + (platformBar
+                            ? " (the platform's is still on screen, " + bottomSystemInset() + "px)"
+                            : ""));
         }
+        // …and keep asking the platform for the same on the display itself.
+        if (!onPhone()) hideSystemBars();
     }
 
     /**

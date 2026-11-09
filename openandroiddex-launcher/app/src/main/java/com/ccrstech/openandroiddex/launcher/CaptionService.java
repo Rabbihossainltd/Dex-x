@@ -957,8 +957,60 @@ public final class CaptionService extends AccessibilityService {
     }
 
     /** @return true if any caption geometry changed, i.e. windows are on the move. */
+    /**
+     * Take a foreign home off the desktop display.
+     *
+     * Android launches the phone's own launcher (the HOME activity) onto a new
+     * display by itself, the moment the display is added — before our
+     * LauncherActivity is started on it. Our surface is opaque, so the platform
+     * home only shows through the moments ours is redrawn, which reads as
+     * "there are two home screens, the main one and another on top of it" —
+     * and it is the platform's home that brings the platform's navigation bar
+     * and its wallpaper with it.
+     *
+     * Closing it is not the same as closing an app: the task is the system
+     * launcher's, it still exists on the phone's own display, and nothing of
+     * the user's is lost. We only ever remove one whose package IS the current
+     * HOME package and is not ours — never a package the user opened.
+     */
+    private void sweepForeignHome(int display, List<WmClient.Task> live) {
+        if (live == null || live.isEmpty()) return;
+        String home = platformHomePkg();
+        if (home == null || home.equals(getPackageName())) return;
+        for (WmClient.Task t : live) {
+            if (!home.equals(t.pkg)) continue;
+            if (t.taskId <= 0) continue;
+            boolean gone = wm != null && wm.close(t.taskId);
+            DexLog.step("desktop", "the platform's home was on the desktop display (task "
+                    + t.taskId + ") — " + (gone ? "closed it" : "could not close it"));
+            return;
+        }
+    }
+
+    /** The current HOME package, resolved at most once a minute. */
+    private String platformHomePkg() {
+        long now = android.os.SystemClock.uptimeMillis();
+        if (homePkg != null && now - homePkgAt < 60_000) return homePkg;
+        try {
+            android.content.Intent i = new android.content.Intent(android.content.Intent.ACTION_MAIN)
+                    .addCategory(android.content.Intent.CATEGORY_HOME);
+            android.content.pm.ResolveInfo r = getPackageManager().resolveActivity(i, 0);
+            homePkg = r == null || r.activityInfo == null ? "" : r.activityInfo.packageName;
+        } catch (RuntimeException e) {
+            homePkg = "";
+        }
+        homePkgAt = now;
+        return homePkg;
+    }
+
+    private String homePkg;
+    private long homePkgAt;
+
     private boolean applyTasks(int display, List<WmClient.Task> live) {
         trackDensity(display);
+        // Once every ~4 s at the idle tick: a home task that is gone stays gone,
+        // and a loop here would close the same task hundreds of times a minute.
+        if (ticks % 10 == 0) sweepForeignHome(display, live);
         moved = false;
         tasks.clear();
         // Kept in the daemon's order — TOPMOST FIRST — because stacking depends on it.
@@ -1017,7 +1069,17 @@ public final class CaptionService extends AccessibilityService {
                     changed = true;
                 }
             }
-            if (changed) publishMinimised();
+            // …and republish it every few seconds even when nothing changed.
+            //
+            // The launcher's taskbar keeps what is here plus the PC's
+            // visibility list, which cannot see a minimised window. That works
+            // only while the launcher's own copy of this set is populated — and
+            // a launcher activity re-created mid-session (a display rebuild, a
+            // crash, "am force-stop" on the phone) starts with it empty and
+            // never hears about it again, which is the app that "does not stay
+            // in the taskbar when minimised". A 2 s re-statement costs an
+            // in-process broadcast and removes the whole class.
+            if (changed || (!minimised.isEmpty() && ticks % 5 == 0)) publishMinimised();
         }
 
         List<AccessibilityWindowInfo> windows = windowsOnDisplay(display);

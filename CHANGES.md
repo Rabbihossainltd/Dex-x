@@ -128,6 +128,19 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.9 — five things a working caption bar made visible
+
+With the window daemon finally running, the desktop appeared and the next five reports
+became answerable in the code:
+
+| Report | What was actually wrong | Fix |
+| --- | --- | --- |
+| **No sound on the computer, and not separated from the phone** | The sound lived in a second, `--no-video` scrcpy process (the "companion"). It could die a second after starting and leave nothing behind but a log line — and on a phone below Android 13 its `--audio-dup` is refused outright, so the retry then took the phone's sound away. | The desktop session carries the sound itself: `--audio-source=playback --audio-dup` on the one process the user is already watching. The Android floors are now enforced in Rust before the command line is built — dup on 13+, any forwarding on 11+ — so an old phone gets "sound moved here" instead of a session that exits. The companion still exists for app windows, which have no other owner. |
+| **The pointer is a plain arrow, never a hand or a resize handle** | The desktop asked for `--mouse=sdk`, the one mode in which Android never draws a pointer. The launcher has had a whole pointer vocabulary all along (`DexCursors`: hand, I-beam, resize, resize-h, resize-v, grabbing, no-drop) and none of it could ever reach the screen. | `--mouse=uhid`: the phone draws the pointer, with the shape the platform picks for whatever is under it. The pointer is captured while it is over the desktop — click to grab, Alt to hand it back — which is what scrcpy's own documentation describes for this mode. A phone that refuses `/dev/uhid` never gets a desktop at all, which the existing `fallback_options` retry already recovers from. |
+| **An app does not stay in the taskbar when minimised** | The PC's open-apps broadcast is built from *visibility*, and a minimised window is not visible — the device side has a "minimised, still open" set exactly for this (`CaptionService.minimised`), but it only broadcast it when it *changed*. A launcher activity re-created mid-session therefore started with the set empty and never heard about it again. | The set is re-stated every ~2 s while it is non-empty. An in-process broadcast, and it removes the class of "the tile vanished and never came back". |
+| **The phone's navigation bar is on the desktop** | Ours, drawn by `syncNavCluster` whenever the platform's bar was absent — which is exactly when the desktop looks right otherwise. | The desktop never draws navigation keys: `— □ ✕` are on every caption, Start and the open apps are on the taskbar, and the phone's dock keeps its keys because there is no taskbar there. The platform's own bars are still asked to stay away (`hideSystemBars`), and the log now says which of the two was on screen. |
+| **Two home screens, one on top of the other** | Android launches the phone's HOME activity onto a new display by itself, before our launcher is started on it. Our surface is opaque, so the platform's home showed through at every redraw — and it brings its own wallpaper and its own bars with it. | `CaptionService` now sweeps the desktop display: a task whose package IS the current HOME package (and is not ours) is closed. The phone's own home is untouched — it is a different display, and nothing of the user's lives in that task. |
+
 ## v0.7.8 — the window daemon was last in a chain that could stop anywhere
 
 A full read of the desktop's start path, and the reason a working session could be refused

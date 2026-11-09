@@ -59,18 +59,19 @@ function desktopOptions(d: DeviceInfo): MirrorOptions {
     // the Rust side unless a rate was picked in Settings
     videoBitRateMbps: 8,
     maxFps: 0,
-    // The desktop window carries NO audio of its own.
+    // The desktop session carries the sound itself, and asks for it to play
+    // here AND on the phone: `--audio-source=playback --audio-dup`, one
+    // process. It used to be a separate --no-video companion, which could die
+    // a second after starting with its reason buried in the log — "there is no
+    // sound on the computer" with nothing to see anywhere. A session cannot
+    // silently miss its own audio: either the phone gives it, or the desktop
+    // does not start.
     //
-    // Two scrcpy sessions capturing one phone's sound is one too many: the
-    // desktop's own capture and the audio companion (scrcpy.rs's
-    // reconcile_audio_session, which asks for --audio-source=playback
-    // --audio-dup so the phone keeps playing too) compete for the same device
-    // capture, and whichever loses does so by exiting a second after it starts
-    // — silently, from the point of view of anyone listening. So the sound has
-    // exactly one owner: the companion. See its `spawning:` line in the log for
-    // the exact command line it was given.
-    audio: false,
-    audioPlayback: false,
+    // The Rust side owns the Android floors (dup is 13+, any audio is 11+): a
+    // phone below them gets the sound moved here, or left alone, rather than a
+    // command line it will refuse.
+    audio: true,
+    audioPlayback: true,
     stayAwake: true,
     // stayAwake only holds while the phone charges; over Wi-Fi on battery an
     // idle desktop would otherwise time out and go dark
@@ -83,10 +84,17 @@ function desktopOptions(d: DeviceInfo): MirrorOptions {
     freeform: true,
     // forward right-click to Android for context menus; Back = Shift+right-click
     mouseBind: "+hsn:bhsn",
-    // scrcpy's own default: the PC keeps its cursor and nothing is captured.
-    // Settings → Mouse & cursor switches it to "uhid", which is the only mode
-    // in which Android draws the pointer into the stream.
-    mouseMode: "sdk",
+    // Android draws the pointer: hand over a link, ↔ on a freeform edge,
+    // I-beam in a field — the shapes the platform picks for whatever is under
+    // it, which is the whole point. In `sdk` mode the computer keeps its own
+    // arrow and no shape ever changes.
+    //
+    // UHID means the pointer is captured while it is over the desktop (click
+    // to grab, Alt to hand it back), the way a remote-desktop window behaves.
+    // A phone that refuses /dev/uhid never gets a desktop at all — that is a
+    // scrcpy exit before its first display, which `fallback_options` already
+    // retries once without it.
+    mouseMode: "uhid",
   };
 }
 
