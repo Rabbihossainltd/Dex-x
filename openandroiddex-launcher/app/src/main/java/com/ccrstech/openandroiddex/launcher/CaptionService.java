@@ -1480,7 +1480,15 @@ public final class CaptionService extends AccessibilityService {
         // The snap buttons and the resize grip are extras and go first when the
         // window is too narrow for the set.
         final boolean detour = WidgetDetourActivity.isDetourTask(task.taskId);
-        final int btnPx = buttonWidth();
+        // Three buttons is the floor, and it is a HARD floor: if the window is
+        // narrower than they need, they are drawn narrower rather than dropped
+        // or clipped. A 12 px button is still a button; a missing ✕ is a window
+        // with no way to close it.
+        int btnPx = buttonWidth();
+        int threeWide = btnPx * 3 + px(24);
+        if (!detour && width < threeWide) {
+            btnPx = Math.max(px(16), (width - px(24)) / 3);
+        }
         final boolean wide = !detour && roomForSnaps(width);
 
         LinearLayout cluster = new LinearLayout(ui);
