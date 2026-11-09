@@ -404,10 +404,13 @@ public class SettingsActivity extends Activity {
                 "➤", 0xFFf472b6, new int[]{R.string.st_cursor_style,
                 R.string.st_cursor_size, R.string.st_cursor_color, R.string.st_cursor_outline,
                 R.string.st_cursor_speed, R.string.st_cursor_render}));
-        navs.add(new Nav(SEC_TOUCHPAD, R.string.st_nav_touchpad, R.string.st_nav_touchpad_sub,
-                "⌗", 0xFF38bdf8, new int[]{R.string.st_touchpad,
-                R.string.st_gesture_3up, R.string.st_gesture_3down, R.string.st_gesture_3left,
-                R.string.st_gesture_3right, R.string.st_gesture_3tap}));
+        // No Touchpad page in this window.
+        //
+        // Reported: "exe settings theke je mobile er jonno touchpad options ta remove
+        // koro". This Settings window is the desktop's, and the phone-as-touchpad is a
+        // phone feature: the pad appears on the handset when this computer shows the
+        // desktop, and its gestures are configured there, on the pad itself. Two homes
+        // for one setting is how the two drift apart.
         navs.add(new Nav(SEC_STREAM, R.string.st_nav_stream, R.string.st_nav_stream_sub,
                 "🎞", 0xFFf59e0b, new int[]{R.string.st_resolution, R.string.st_codec,
                 R.string.st_encoder, R.string.st_bitrate, R.string.st_fps}));

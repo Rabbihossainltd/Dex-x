@@ -885,10 +885,51 @@ public final class CaptionService extends AccessibilityService {
      * the two apart, and our other windows are exempted the same way.
      */
     private boolean isDesktopTask(WmClient.Task t) {
-        return getPackageName().equals(t.pkg)
-                && !SettingsActivity.class.getName().equals(t.activity)
-                && !TaskManagerActivity.class.getName().equals(t.activity)
-                && !FileTransferActivity.class.getName().equals(t.activity);
+        return getPackageName().equals(t.pkg) && isDesktopActivity(t.activity);
+    }
+
+    /**
+     * Is this one of OUR activities the desktop draws itself, rather than a window on it?
+     *
+     * <p>Compared on the SIMPLE class name, deliberately. The task list comes from a
+     * {@code dumpsys} parse, and what that prints is not always the fully qualified name
+     * this app knows: a task started by {@code am start -n pkg/.LauncherActivity} reports
+     * ".LauncherActivity" on some platforms and the full name on others. An exact
+     * {@code equals} therefore missed the desktop's own home on exactly those phones, gave
+     * it a caption — minimize, maximize, CLOSE — and closing it left the display showing
+     * whatever Android put there next: the phone's wallpaper and its own home. That is the
+     * "home e close button keno" and the "majher screen" in one place.
+     */
+    private boolean isDesktopActivity(String activity) {
+        // Our package with no activity name: the home (its task is the display's base).
+        if (activity == null || activity.isEmpty()) return true;
+        // The home IS the desktop — never a window on it, so never a caption.
+        if (matches(activity, LauncherActivity.class)) return true;
+        // These three are ordinary windows of the desktop and DO wear a caption.
+        if (matches(activity, SettingsActivity.class)) return false;
+        if (matches(activity, TaskManagerActivity.class)) return false;
+        if (matches(activity, FileTransferActivity.class)) return false;
+        // Some other activity of ours: treat it as a window, which is the safe way
+        // round (a stray caption on a dialog beats a desktop with no way to move it).
+        return false;
+    }
+
+    /** {@code activity} names {@code c}, in any of the forms a dumpsys parse produces. */
+    private static boolean matches(String activity, Class<?> c) {
+        String simple = c.getSimpleName();
+        return activity.equals(c.getName()) || activity.equals(simple)
+                || activity.endsWith("." + simple);
+    }
+
+    /** Our launcher's own task on the desktop display, if it is still there. */
+    private boolean desktopHomeAlive(List<WmClient.Task> live) {
+        if (live == null) return true;                 // no answer is not "gone"
+        for (WmClient.Task t : live) {
+            if (!getPackageName().equals(t.pkg)) continue;
+            if (t.activity == null || t.activity.isEmpty()
+                    || t.activity.endsWith("LauncherActivity")) return true;
+        }
+        return false;
     }
 
     /**
@@ -1020,6 +1061,17 @@ public final class CaptionService extends AccessibilityService {
         // Once every ~4 s at the idle tick: a home task that is gone stays gone,
         // and a loop here would close the same task hundreds of times a minute.
         if (ticks % 10 == 0) sweepForeignHome(display, live);
+        // …and the mirror of it: if OUR home is gone from the display, put it back.
+        //
+        // A caption's ✕ used to be able to close it (see isDesktopActivity), and an app
+        // that force-stops us leaves the display with nothing but the platform's home.
+        // Either way the desktop must not be left showing someone else's screen: the
+        // launcher is the desktop.
+        if (live != null && !live.isEmpty() && !desktopHomeAlive(live)) {
+            boolean back = wm != null && wm.home(display);
+            DexLog.step("desktop", "the desktop's home was missing — "
+                    + (back ? "started it again" : "could not start it again"));
+        }
         moved = false;
         tasks.clear();
         // Kept in the daemon's order — TOPMOST FIRST — because stacking depends on it.

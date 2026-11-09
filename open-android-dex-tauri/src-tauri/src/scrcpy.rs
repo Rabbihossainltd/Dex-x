@@ -1713,24 +1713,33 @@ fn apply_stored_config(app: &AppHandle, opts: &mut MirrorOptions) {
         }
         _ => opts.video_encoder = None,
     }
-    // Audio never rides the desktop session any more. It lives in a companion
-    // audio-only scrcpy process (see `reconcile_audio_session`), precisely so
-    // that "where sound plays" — the taskbar's quick settings, and Settings →
-    // Stream — can change LIVE, by cycling that small process, instead of
-    // costing a desktop restart. The stored `audio`/`audiodup` keys are still
-    // the source of truth; `stored_audio_forwarding` reads them for the
-    // companion.
-    opts.audio = false;
-    opts.audio_playback = false;
+    // Audio is the CALLER's decision and nothing here may overrule it.
+    //
+    // This block used to force `audio = false` on every session — a leftover
+    // from when the sound lived in a companion process. When the companion was
+    // dropped (0.7.9, so that a refused capture could not vanish silently), the
+    // override stayed: every desktop session was built with `--no-audio` no
+    // matter what the window asked for, and the phone simply kept its own
+    // sound. "Sound computer e ashe na" was this line, not the phone.
+    //
+    // `start_mirror` has already applied the phone's Android floor to these
+    // two flags, so what arrives here is what the phone can actually do.
     if let Some(clipboard) = map.get("clipboard") {
         opts.clipboard_autosync = clipboard != "off";
     }
     // Settings → Mouse & cursor → Pointer rendering. Like every other scrcpy
     // argument it only lands on a fresh session, which is why that card
     // carries the restart footer.
+    // …and the same for the pointer. The window asks for uhid (the only mode
+    // in which Android draws the cursor, so the only one where a link becomes
+    // a hand and a window edge becomes ↔). The stored key can still say "sdk"
+    // — someone who wants the computer's own arrow back — and only that
+    // explicit answer may overrule what was asked for. Unset used to mean sdk,
+    // which quietly undid the whole feature.
     match map.get("mouse").map(String::as_str) {
+        Some("sdk") => opts.mouse_mode = None,
         Some("uhid") => opts.mouse_mode = Some("uhid".into()),
-        _ => opts.mouse_mode = None, // "sdk" or unset — scrcpy's own default
+        _ => {} // unset: keep what the caller asked for
     }
     // "Reduce quality" (Settings → Performance), the half that costs frames on
     // the WIRE rather than on the phone. Over Wi-Fi the encoder asking for more

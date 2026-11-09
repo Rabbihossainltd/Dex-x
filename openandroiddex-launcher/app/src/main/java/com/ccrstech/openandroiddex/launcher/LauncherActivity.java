@@ -488,14 +488,20 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         //
         // The phone's own dock keeps its keys: there is no taskbar there, and
         // Back is the way out of the drawer.
-        int want = onPhone() ? View.VISIBLE : View.GONE;
+        // NOWHERE. Not on the desktop, and not on the phone's dock either.
+        //
+        // Two rounds of this were reported and both were right: first the keys sat
+        // under the taskbar on the desktop, then they came back in the drawer on the
+        // phone's own screen. Every window carries — □ ✕, the taskbar carries Start
+        // and the open apps, and the drawer is closed by tapping outside it (or by
+        // the Back key the phone already has). There is nothing left for a strip of
+        // our own three buttons to do.
+        int want = View.GONE;
         if (navCluster.getVisibility() != want) {
             navCluster.setVisibility(want);
-            DexLog.step("taskbar", onPhone()
-                    ? "phone dock — drawing our nav keys"
-                    : "desktop — no navigation bar of ours" + (platformBar
-                            ? " (the platform's is still on screen, " + bottomSystemInset() + "px)"
-                            : ""));
+            DexLog.step("taskbar", "navigation keys removed"
+                    + (platformBar ? " (the platform's own bar is on screen, "
+                            + bottomSystemInset() + "px)" : ""));
         }
         // …and keep asking the platform for the same on the display itself.
         if (!onPhone()) hideSystemBars();
@@ -2329,18 +2335,11 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
      * load while something else is in front.
      */
     private void setupPerfGauge() {
+        // REMOVED by request: the CPU / RAM / DISK pill in the top-right corner of
+        // the desktop. Not a setting any more, not hidden behind one — the view is
+        // never built, so nothing can bring it back. What it showed is still in the
+        // Task Manager, which is where a person looks when they want numbers.
         detachPerfGauge();
-        // buildUi() always runs first (see onCreate and the density rebuild),
-        // so this is the fresh root — but never assume a view tree exists.
-        if (rootFrame == null) return;
-        perfGaugeView = buildPerfGauge();
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP | Gravity.END);
-        lp.topMargin = topSystemInset() + dp(12);
-        lp.rightMargin = dp(12);
-        // Added last, so it draws over the icon grid rather than under it.
-        rootFrame.addView(perfGaugeView, lp);
     }
 
     private void detachPerfGauge() {
@@ -5391,6 +5390,12 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
      * them one word, in a flyout that is already the height of the display.
      */
     private void addSoundOutput(LinearLayout panel, int panelWidth) {
+        // REMOVED by request — and unreachable on purpose: the only caller is gone
+        // (see the quick panel's build). Sound has exactly one answer now, it comes
+        // to this computer and the phone keeps playing too (--audio-dup); a row that
+        // offers to change it only exists to be asked "why is this here". It also
+        // read "Computer and phone" while the two were in fact separate, which is
+        // the worst thing a status line can do.
         View divider = new View(this);
         divider.setBackgroundColor(theme.divider);
         LinearLayout.LayoutParams divLp = new LinearLayout.LayoutParams(panelWidth, dp(1));
@@ -5696,7 +5701,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
 
         // Under the sliders, because it answers the question a slider that
         // changed nothing audible leaves behind.
-        addSoundOutput(panel, panelWidth);
+        // addSoundOutput(panel, panelWidth) — removed by request: see the method.
 
         View divider = new View(this);
         divider.setBackgroundColor(theme.divider);

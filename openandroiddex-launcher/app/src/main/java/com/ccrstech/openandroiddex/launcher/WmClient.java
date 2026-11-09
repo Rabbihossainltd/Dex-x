@@ -513,6 +513,15 @@ final class WmClient {
      * was already on the desktop, or never turned up — and -1 when the daemon did not
      * answer. "OK none" is an OK, so a yes/no here could not tell the first two apart.
      */
+    /**
+     * Put the desktop's own launcher back on {@code displayId}, through the daemon's HOME
+     * verb (which is `am start` from uid 2000 — the only uid that may start an activity onto
+     * an untrusted display).
+     */
+    boolean home(int displayId) {
+        return ok(request("HOME " + displayId));
+    }
+
     int reclaim(int displayId, String component) {
         String reply = request("RECLAIM " + displayId + " " + component);
         if (!ok(reply)) return -1;

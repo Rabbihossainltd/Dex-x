@@ -128,6 +128,31 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.11 — the two overrides that undid the last two releases
+
+Checked again as asked, and the check found why 0.7.9 and 0.7.10 could both look unchanged:
+`apply_stored_config` — the function every session passes through — **overruled the caller**.
+
+| What was asked for | What `apply_stored_config` then did | Result on the phone |
+| --- | --- | --- |
+| `audio: true, audioPlayback: true` (0.7.9's "the desktop carries its own sound") | `opts.audio = false; opts.audio_playback = false;` — a leftover from the days of the audio companion | every desktop session was built with `--no-audio`; the phone kept its sound and the computer stayed silent |
+| `mouseMode: "uhid"` (0.7.9's "Android draws the pointer") | `_ => opts.mouse_mode = None`, where `_` covers "unset" | every desktop silently fell back to `--mouse=sdk`, the one mode in which Android never draws a cursor — so no hand, no I-beam, no resize arrow |
+
+Both are fixed: audio is the caller's decision and nothing overrides it (the Android floors are
+still applied in `start_mirror`, before the command line exists), and only an explicit `mouse: sdk`
+in the stored settings may take the pointer back — "unset" no longer means sdk.
+
+### The rest of the list
+
+| Report | What it was | Fix |
+| --- | --- | --- |
+| **The home wears a caption with ✕, and closing it shows the phone's wallpaper** | The desktop's own home was recognised by comparing the task's activity to the full class name. What a `dumpsys` parse reports is not always that form (`.LauncherActivity` on some platforms), so the home failed the test, got a caption — minimize, maximize, CLOSE — and closing it left the display to Android, i.e. the platform's home with the phone's wallpaper. | The test is on the simple class name now, in every form a parse produces, so the home is the home and never wears chrome. If it ever does go missing, the service starts it again through the daemon's `HOME`. |
+| **The taskbar's "Sound output — Computer and phone" row** | A row offering a choice that no longer exists, and misreporting the state while it was at it. | Removed. Sound comes to the computer and the phone keeps playing; there is nothing to choose. |
+| **CPU / RAM / DISK in the corner** | A desktop widget nobody asked for. | Never built — not hidden, not a setting. The numbers are still in the Task Manager. |
+| **Navigation buttons in the drawer** | Our own ◁ ○ ▢ strip, which survived the last round on the phone's dock. | Removed everywhere. Windows carry — □ ✕, the taskbar carries Start, Back is the phone's. |
+| **Touchpad options in the exe's Settings** | The phone-as-touchpad is a phone feature; its settings were in the desktop's Settings window too. | The section is gone from that window. |
+| **UAC says "Unknown publisher"** | UAC reads the Authenticode signature, and there was none. | The build now signs the installer and the portable exe with a self-signed code-signing certificate whose subject is `CN=Rabbihossainltd`, so every signature Windows can read names us. A **self-signed** certificate still cannot buy the chain Windows trusts, so SmartScreen may keep warning until a CA-issued certificate replaces it — that is a purchase, not code. |
+
 ## v0.7.10 — gestures that follow the pointer, and a taskbar that stays
 
 | Report | What it was | Fix |
