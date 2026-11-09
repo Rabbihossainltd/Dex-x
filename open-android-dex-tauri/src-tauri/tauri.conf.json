@@ -58,9 +58,9 @@
         "installMode": "currentUser",
         "displayLanguageSelector": false,
         "installerIcon": "./windows/installer.ico",
-        "installerHeaderIcon": "./windows/installer-header.ico",
         "headerImage": "./windows/header.bmp",
-        "sidebarImage": "./windows/sidebar.bmp"
+        "sidebarImage": "./windows/sidebar.bmp",
+        "uninstallerIcon": "./windows/installer.ico"
       }
     }
   },
