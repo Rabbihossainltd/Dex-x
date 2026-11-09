@@ -208,7 +208,16 @@ jobs:
           New-Item -ItemType Directory -Path dist -Force | Out-Null
           New-Item -ItemType Directory -Path portable -Force | Out-Null
 
-          Copy-Item "$rel/open-android-dex-tauri.exe" portable/
+          # The binary was renamed (tauri.conf.json mainBinaryName), so ask for
+          # the new name and fall back to the old one: a rename that only half
+          # lands should fail here, loudly, not ship an upstream-named exe.
+          $exe = @("$rel/Dex-X.exe", "$rel/open-android-dex-tauri.exe") |
+            Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $exe) {
+            throw "no exe in $rel — found: $((Get-ChildItem $rel -Filter *.exe).Name -join ', ')"
+          }
+          Write-Host "staging $exe"
+          Copy-Item $exe portable/
           if (Test-Path "$rel/resources") { Copy-Item "$rel/resources" portable/resources -Recurse }
 
           # The user's two downloads: a zip that runs from anywhere, and the
