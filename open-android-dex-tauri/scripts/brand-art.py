@@ -158,6 +158,23 @@ def main():
         art(size).save(os.path.join(pub, name))
         print("wrote public/" + name)
 
+    # ── the installer's own artwork ───────────────────────────────────────
+    # The setup window uses four pictures: the exe's icon, the small icon in its
+    # title bar, a 150x57 strip beside the step text and a 164x314 panel down
+    # the left. NSIS wants 24-bit BMPs for the last two.
+    win = os.path.join(APP, "src-tauri", "windows")
+    os.makedirs(win, exist_ok=True)
+    _ico_exact(os.path.join(win, "installer.ico"),
+               [16, 24, 32, 48, 64, 128, 256],
+               {s: tile(x, s, X_SCALE) for s in (16, 24, 32, 48, 64, 128, 256)})
+    _ico_exact(os.path.join(win, "installer-header.ico"), [64],
+               {64: tile(x, 64, X_SCALE)})
+    _panel(word, 150, 57, 0.90, (255, 255, 255)).save(
+        os.path.join(win, "header.bmp"), format="BMP")
+    _panel(tile(x, 164, X_SCALE), 164, 314, 1.0, (242, 244, 248)).save(
+        os.path.join(win, "sidebar.bmp"), format="BMP")
+    print("wrote installer.ico / installer-header.ico / header.bmp / sidebar.bmp")
+
     # ── the launcher's adaptive icon ──────────────────────────────────────
     # 432 px = 108 dp at xxxhdpi. The mask keeps the middle 66 dp, so the art
     # spans SAFE_ZONE of the canvas and no launcher can crop it.
@@ -167,6 +184,17 @@ def main():
     tile(x, 432, SAFE_ZONE * 0.98).save(os.path.join(out, "ic_launcher_foreground.png"))
     flat(x, 432, SAFE_ZONE * 0.98).save(os.path.join(out, "ic_launcher_monochrome.png"))
     print("wrote launcher ic_launcher_foreground.png / _monochrome.png (432 px)")
+
+
+def _panel(art, w, h, scale, bg):
+    """`art` centred on a w x h panel — NSIS's header strip and side panel."""
+    out = Image.new("RGB", (w, h), bg)
+    inner = max(1, min(int(w * scale), int(h * scale)))
+    aw, ah = art.size
+    k = min(inner / aw, inner / ah)
+    r = art.resize((max(1, int(aw * k)), max(1, int(ah * k))), Image.LANCZOS)
+    out.paste(r, ((w - r.width) // 2, (h - r.height) // 2), r)
+    return out
 
 
 def _ico_exact(path, sizes, images):

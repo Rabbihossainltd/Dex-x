@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Dex-X",
-  "version": "0.7.7",
+  "version": "0.7.8",
   "identifier": "com.ccrstech.openandroiddex",
   "build": {
     "beforeDevCommand": "npm run apk && npm run dev",
@@ -45,18 +45,22 @@
       "resources/icon",
       "resources/THIRD_PARTY_LICENSES.md"
     ],
-    "publisher": "Dex-X",
-    "copyright": "Copyright (C) 2026 Rabbi Hossain. Based on Open Android DeX, Copyright (C) 2026 Idrees Khan.",
+    "publisher": "Rabbihossainltd",
+    "copyright": "Copyright (C) 2026 MD Rabbi Hossain (Rabbihossainltd). Based on Open Android DeX, Copyright (C) 2026 Idrees Khan.",
     "license": "GPL-3.0-or-later",
     "licenseFile": "../../LICENSE",
     "homepage": "https://github.com/Rabbihossainltd/Dex-x",
-    "shortDescription": "A desktop for your Android phone, on your Windows PC",
+    "shortDescription": "Dex-X by Rabbihossainltd — a desktop for your Android phone, on your Windows PC",
     "longDescription": "Dex-X turns your Android phone into a desktop on your Windows PC: real windows, a taskbar, your notifications. Your phone keeps its own screen.",
     "windows": {
       "nsis": {
         "installerHooks": "./windows/nsis-hooks.nsh",
         "installMode": "currentUser",
-        "displayLanguageSelector": false
+        "displayLanguageSelector": false,
+        "installerIcon": "./windows/installer.ico",
+        "installerHeaderIcon": "./windows/installer-header.ico",
+        "headerImage": "./windows/header.bmp",
+        "sidebarImage": "./windows/sidebar.bmp"
       }
     }
   },

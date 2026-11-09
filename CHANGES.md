@@ -128,6 +128,17 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.8 — the window daemon was last in a chain that could stop anywhere
+
+A full read of the desktop's start path, and the reason a working session could be refused
+on any phone that ignores one setting:
+
+| # | The defect | Why it matters | Fix |
+| --- | --- | --- | --- |
+| 1–6 | `adb_prepare_desktop` ended with `start_wmd`. Ahead of it sat a chain of `settings put` round trips joined by `?`, so **the first refused key aborted the function and the window daemon was never started**. The phone then reports `PING: NO ANSWER`, and with no daemon there is no caption bar, no resize, no taskbar row, no strip and no phone-side repair — every item on the list, from one line. | A managed phone, an OEM that drops `hidden_api_policy`, or one failed `adb shell` is enough. The desktop still appears (scrcpy makes the display either way), which is why it looked like ten separate bugs. | The daemon starts **first**, before anything that can fail, and the settings write is no longer fatal: it logs and the read-back below says what actually landed. |
+| — | The PC report did not look at the desktop's own wiring | "Create a diagnostics report" listed devices and payloads, but not whether `adb forward tcp:7191` existed, whether the daemon answered, or what the phone's accessibility list said. | The report gains **desktop plumbing**: `adb forward --list`, a `PING` to the daemon, the desktop display id, the tail of `/data/local/tmp/wmd.log`, the phone's `enabled_accessibility_services`, and the launcher's installed version. |
+| — | The installer had no branding and the publisher read as the app | Reported directly. | `publisher: "Rabbihossainltd"` — that is what Windows shows in Settings → Apps and in the setup's own "Published by". The setup now carries its own logo throughout: `installer.ico` (the setup exe's icon and title bar), `installer-header.ico`, and NSIS's `headerImage` / `sidebarImage` bitmaps, all generated from `scripts/brand-src` by `brand-art.py`. |
+
 ## v0.7.7 — the installer that could not overwrite a running adb
 
 The 0.7.6 diagnostics came back, and with it three screenshots of the installer failing.

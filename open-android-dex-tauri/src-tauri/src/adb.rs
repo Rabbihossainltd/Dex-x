@@ -1134,6 +1134,19 @@ pub fn adb_prepare_desktop(
 ) -> Result<bool, String> {
     log::info!("── prepare desktop profile on {serial} (samsung_desktop={samsung_desktop}) ──");
     crate::diag::log_device(&app, &serial);
+
+    // THE WINDOW DAEMON COMES FIRST.
+    //
+    // It used to be the LAST line of this function, behind a chain of
+    // `settings put` round trips — and any one of those returning an error
+    // propagated out of here with `?` and skipped everything after it,
+    // including the daemon. A phone that refuses one of those keys (a managed
+    // device, an OEM that drops `hidden_api_policy`) therefore got a desktop
+    // with no caption bar, no resize and no taskbar row while the phone's own
+    // diagnostics said `PING: NO ANSWER`. Nothing about the daemon depends on
+    // those settings: it is pushed, started and forwarded over adb, and the
+    // display it talks about does not exist yet either.
+    start_wmd(&app, &serial);
     // Read before writing: this is both the "was Samsung desktop mode already
     // on" answer and the snapshot Exit DeX restores from.
     let before = read_desktop_globals(&app, &serial);
@@ -1155,7 +1168,12 @@ pub fn adb_prepare_desktop(
                 "settings put global force_desktop_mode_on_external_displays {desktop_flag}; settings put global enable_freeform_support 1; settings put global force_resizable_activities 1; settings put global hidden_api_policy 1; settings put global {TOUCH_GLOBAL} 0"
             ),
         ],
-    )?;
+    ) {
+        // NOT `?`. One refused key used to take the whole prepare — and the
+        // window daemon's neighbours with it — down a path whose only trace
+        // was a Rust error in the trace log.
+        log::warn!("desktop profile write failed on {serial}: {e} — continuing without it");
+    }
     // The platform's navigation bar, off the desktop. Snapshot first — this is
     // the user's own setting on the phone's screen and it is put back on exit.
     let sec_before = read_desktop_secure(&app, &serial);
@@ -2398,7 +2416,6 @@ pub fn adb_start_launcher(
         ),
     }
     exempt_from_power_saving(&app, &serial);
-    start_wmd(&app, &serial);
 
     // fresh task, pinned fullscreen (windowingMode 1): the launcher IS the
     // desktop surface even though the display defaults to freeform. A

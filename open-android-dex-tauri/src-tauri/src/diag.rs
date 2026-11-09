@@ -496,6 +496,60 @@ pub fn diag_collect(app: AppHandle, serial: Option<String>) -> Result<String, St
         None => report.push_str("\nno online device to probe\n"),
     }
 
+    // ── the desktop's own wiring ──
+    //
+    // Every symptom in this project's reports — no title bars, no resize, no
+    // taskbar row, no sound — reduces to these lines, and none of them is
+    // visible anywhere else in the app.
+    report.push_str("\n──── desktop plumbing ────\n");
+    report.push_str(&format!(
+        "adb forward --list:\n{}\n",
+        adb::run_adb(&app, &["forward", "--list"]).unwrap_or_else(|e| format!("<{e}>"))
+    ));
+    let wmc = crate::wm::WmClient::new();
+    report.push_str(&format!(
+        "window daemon PING (127.0.0.1:{}): {}\n",
+        crate::wm::HOST_PORT,
+        if wmc.ping() { "OK" } else { "NO ANSWER" }
+    ));
+    report.push_str(&format!("desktop display: {:?}\n", wmc.desktop_display()));
+    if let Some(serial) = serial.clone().or_else(|| first_online_device(&app)) {
+        report.push_str(&format!(
+            "wmd log (last 20 lines):\n{}\n",
+            adb::run_adb(
+                &app,
+                &["-s", &serial, "shell", "tail -n 20 /data/local/tmp/wmd.log"]
+            )
+            .unwrap_or_else(|e| format!("<{e}>"))
+        ));
+        report.push_str(&format!(
+            "accessibility list on the phone:\n{}\n",
+            adb::run_adb(
+                &app,
+                &[
+                    "-s",
+                    &serial,
+                    "shell",
+                    "settings get secure enabled_accessibility_services"
+                ]
+            )
+            .unwrap_or_else(|e| format!("<{e}>"))
+        ));
+        report.push_str(&format!(
+            "launcher version on the phone:\n{}\n",
+            adb::run_adb(
+                &app,
+                &[
+                    "-s",
+                    &serial,
+                    "shell",
+                    "dumpsys package com.ccrstech.openandroiddex.launcher | grep -E 'versionName|versionCode' | head -4"
+                ]
+            )
+            .unwrap_or_else(|e| format!("<{e}>"))
+        ));
+    }
+
     report.push_str(&format!(
         "\n──── live scrcpy sessions ────\n{}\n",
         crate::scrcpy::live_session_output(&app)
