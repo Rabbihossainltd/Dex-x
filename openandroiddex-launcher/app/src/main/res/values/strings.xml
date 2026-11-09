@@ -1070,4 +1070,11 @@ If you switch this off again later, Android force-closes Linux and the desktop r
     <string name="lw_opening">Opening %1$s…</string>
     <!-- The taskbar menu of a Linux app's window: asks the app to close it. -->
     <string name="lw_close_window">Close window</string>
+
+    <!-- The in-app update prompt (UpdateCheck): a newer build exists, and the
+         answer is a link to it, never an install. -->
+    <string name="upd_title">Dex-X %1$s is out</string>
+    <string name="upd_body">You have %1$s. The newer build is on the release page, with the Windows app beside it. Nothing is installed for you — the download is a file like the one you sideloaded.</string>
+    <string name="upd_download">Open the release</string>
+    <string name="upd_later">Not now</string>
 </resources>

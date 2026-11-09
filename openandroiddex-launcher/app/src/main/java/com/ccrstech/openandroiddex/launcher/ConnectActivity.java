@@ -92,6 +92,9 @@ public class ConnectActivity extends android.app.Activity {
         // that had chosen us is asked once, politely, to choose its own.
         maybeReleaseHomeRole();
         setContentView(build());
+        // A sideloaded app has no store to tell its owner that a build exists
+        // they have not got. This screen answers it, once a day at most.
+        UpdateCheck.maybe(this);
     }
 
     @Override

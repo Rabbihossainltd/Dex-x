@@ -11,6 +11,7 @@ import { DesktopPage, type Method } from "./features/desktop/DesktopPage";
 import { deviceName, type AdbState, type LaunchMode, type Phase, type Progress } from "./features/desktop/model";
 import { useSessions } from "./features/mirror/useSessions";
 import { NotificationsBell } from "./features/notifications/NotificationsBell";
+import { UpdatePrompt } from "./features/update/UpdatePrompt";
 import { WirelessPanel } from "./features/wireless/WirelessPanel";
 import { ContextMenu, type ContextAction } from "./ui/ContextMenu";
 import { Icon } from "./ui/Icon";
@@ -973,6 +974,7 @@ export default function App() {
       </main>
       <ContextMenu actions={contextActions} />
       <Toast toast={toast} onDismiss={dismiss} />
+      <UpdatePrompt />
       {dropping && (
         <div
           className="pointer-events-none fixed inset-2 z-50 flex items-center justify-center rounded-[var(--item-radius)] border-2 border-dashed border-[var(--accent)]"
