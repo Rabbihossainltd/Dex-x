@@ -245,6 +245,10 @@ jobs:
       # is the file UAC inspects when the wizard is started.
       - name: Sign the exe, the portable binary and the installer
         shell: pwsh
+        # Never fatal: a signature is an improvement to what Windows shows, not a
+        # reason to ship nothing. The step prints the status either way.
+        continue-on-error: true
+        timeout-minutes: 5
         run: |
           $ErrorActionPreference = 'Stop'
           $cert = New-SelfSignedCertificate `
