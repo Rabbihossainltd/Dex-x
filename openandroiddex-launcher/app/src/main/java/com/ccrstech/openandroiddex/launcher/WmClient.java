@@ -547,6 +547,19 @@ final class WmClient {
         }
     }
 
+    /**
+     * Is the daemon reachable — cheap, and never opens a socket?
+     *
+     * <p>For the launcher's own status pill: asking "can I draw a window's
+     * title bar" must not itself cost a connect attempt on every tick, so this
+     * answers from what the last real call found. A client that has not been
+     * used yet counts as reachable, so the pill appears only after a call has
+     * actually failed, not before the first one.
+     */
+    synchronized boolean reachable() {
+        return !reportedFailure;
+    }
+
     /** Whether the last connect attempt got through, so outages are logged once. */
     private boolean everConnected;
     private boolean reportedFailure;

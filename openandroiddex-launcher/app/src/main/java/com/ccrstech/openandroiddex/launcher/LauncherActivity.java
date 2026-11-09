@@ -3,6 +3,7 @@ package com.ccrstech.openandroiddex.launcher;
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.ActivityOptions;
+import android.app.AlertDialog;
 import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProviderInfo;
 import android.content.BroadcastReceiver;
@@ -655,6 +656,8 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     private PopupWindow widgetPicker;
     private PopupWindow mediaPopup;
     private PopupWindow clipPopup;
+    /** Shown in the tray while the caption service cannot draw title bars. */
+    private TextView healthPill;
 
     // ── desktop widgets (AppWidgetHost) ──
     private DexWidgetHost widgetHost;
@@ -1020,6 +1023,12 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         @Override
         public void run() {
             updateClock();
+            // Two fields of state, once a minute: whether the phone has BOUND
+            // the accessibility service and whether the computer's window
+            // daemon is answering. Both can go away mid-session (the daemon
+            // restarts under an update, the service is unbound when the app is
+            // reinstalled) and both are silent when they do.
+            updateWindowHealth();
             // The desktop spends most of a session behind app windows, and an
             // app that shows the platform's navigation bar brings it back for
             // the whole display. Nothing is dispatched to a window that is not
@@ -1438,6 +1447,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     }
     @Override
     protected void onDestroy() {
+        CaptionFallback.detach();
         super.onDestroy();
         // Drops the sampler's view references. The gauge lives in the
         // activity's own view tree now, so it goes with the window either way.
@@ -3931,6 +3941,36 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         int square = dp(compact ? 32 : 36);
         int gap = dp(compact ? 3 : 6);
 
+        // The window controls' own status light.
+        //
+        // Two failures used to be completely invisible: the accessibility
+        // service not being BOUND (Android 13+ keeps a sideloaded app's service
+        // unbound until "Allow restricted settings" is tapped, and says nothing
+        // when it refuses) and the window daemon not answering. Either one and
+        // every window wears the platform caption with none of our buttons, no
+        // resize, no minimise — which looks exactly like the feature not
+        // existing. The pill is the answer: it appears within a second of the
+        // desktop coming up, and a tap explains which one it is and opens the
+        // screen where it is fixed.
+        healthPill = new TextView(this);
+        healthPill.setTextColor(0xFFFFFFFF);
+        healthPill.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(compact ? 10.5f : 11.5f));
+        healthPill.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        healthPill.setGravity(Gravity.CENTER);
+        healthPill.setPadding(dp(9), dp(5), dp(9), dp(5));
+        healthPill.setBackground(roundedFill(0xFFb91c1c, 9));
+        healthPill.setVisibility(View.GONE);
+        healthPill.setOnClickListener(v -> explainWindowControls());
+        LinearLayout.LayoutParams hpLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        hpLp.setMargins(0, 0, dp(6), 0);
+        tray.addView(healthPill, hpLp);
+        updateWindowHealth();
+        // Second renderer for the title bars, started with the shell: it
+        // sleeps until the accessibility caption reports a problem, then draws
+        // the bars itself out of this process (see CaptionFallback).
+        CaptionFallback.attach(this);
+
         batteryPill = new TextView(this);
         batteryPill.setTextColor(theme.text);
         batteryPill.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(compact ? 11 : 12));
@@ -4575,6 +4615,84 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         dismissPopups();
         batteryPopup = makePopup(buildBatteryView());
         showTrayPopup(batteryPopup, Gravity.END);
+    }
+
+    // ── Window controls: is anything able to draw a title bar? ────────────
+
+    /**
+     * Paint the tray's health pill from {@link CaptionService#problem()}.
+     *
+     * Runs on the tray's own clock (see {@code shellTick}); cheap, because the
+     * answer is two fields read in-process.
+     */
+    void updateWindowHealth() {
+        if (healthPill == null) return;
+        String problem = CaptionService.problem();
+        if (problem == null) {
+            if (healthPill.getVisibility() != View.GONE) healthPill.setVisibility(View.GONE);
+            return;
+        }
+        healthPill.setText(getString("nostrip".equals(problem)
+                ? R.string.lx_hc_pill_nostrip : R.string.lx_hc_pill_service));
+        if (healthPill.getVisibility() != View.VISIBLE) healthPill.setVisibility(View.VISIBLE);
+    }
+
+    /**
+     * Say which of the two it is, in full, and go where it is fixed.
+     *
+     * The two have nothing in common but their symptom, so they get two
+     * different answers: the service is a permission the person has to grant on
+     * the phone (once), the daemon is a program the computer starts and can be
+     * asked again.
+     */
+    private void explainWindowControls() {
+        String problem = CaptionService.problem();
+        if (problem == null) {
+            Toast.makeText(this, getString(R.string.lx_hc_ok), Toast.LENGTH_SHORT).show();
+            return;
+        }
+        boolean service = "service".equals(problem);
+        boolean stalled = "nostrip".equals(problem);
+        AlertDialog.Builder b = new AlertDialog.Builder(this)
+                .setTitle(getString(service ? R.string.lx_hc_service_title
+                        : stalled ? R.string.lx_hc_stall_title : R.string.lx_hc_daemon_title))
+                .setMessage(getString(service ? R.string.lx_hc_service_body
+                        : stalled ? R.string.lx_hc_stall_body : R.string.lx_hc_daemon_body))
+                .setNegativeButton(android.R.string.cancel, null);
+        if (service) {
+            b.setPositiveButton(getString(R.string.lx_hc_service_open), (d, w) -> {
+                try {
+                    startActivity(new Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                            .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                } catch (Exception e) {
+                    Toast.makeText(this, getString(R.string.lx_hc_no_settings), Toast.LENGTH_LONG).show();
+                }
+            });
+            b.setNeutralButton(getString(R.string.lx_hc_app_info), (d, w) -> {
+                try {
+                    startActivity(new Intent(
+                            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            android.net.Uri.parse("package:" + getPackageName()))
+                            .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                } catch (Exception ignored) {
+                }
+            });
+        } else if (stalled) {
+            // Plain bars are already on screen; this only says so, and offers
+            // the one thing that can bring the full ones back.
+            b.setPositiveButton(getString(R.string.lx_hc_stall_retry), (d, w) -> {
+                Toast.makeText(this, getString(R.string.lx_hc_stall_asked), Toast.LENGTH_SHORT).show();
+            });
+        } else {
+            b.setPositiveButton(getString(R.string.lx_hc_daemon_retry), (d, w) -> {
+                // The computer answers this from its own queue: it starts the
+                // daemon again (verb "restart"), which is the only thing that
+                // can put the window helper back.
+                RequestProvider.enqueue("restart", "wmd");
+                Toast.makeText(this, getString(R.string.lx_hc_daemon_asked), Toast.LENGTH_SHORT).show();
+            });
+        }
+        b.show();
     }
 
     // ── Clipboard flyout: what the phone copied, newest first ─────────────
@@ -6181,7 +6299,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
                 // and a window with no way back from the taskbar.
                 if (app.component.getClassName().isEmpty()) {
                     if (CaptionService.focusPackage(pkg)) return;
-                    Toast.makeText(this, getString(R.string.wb_not_running, app.label),
+                    Toast.makeText(this, getString(R.string.wb_no_window, app.label),
                             Toast.LENGTH_SHORT).show();
                     return;
                 }
@@ -6299,11 +6417,34 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
             private void showTaskbarAppMenu(View anchor, AppEntry app) {
         android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
         menu.getMenu().add(0, 1, 0, getString(R.string.lx_maximize_restore));
-        menu.getMenu().add(0, 2, 1, getString(R.string.lx_close_app));
-        menu.getMenu().add(0, 3, 2, getString(R.string.lx_app_info));
+        // Geometry that does not need a caption to exist. The caption's own
+        // grips and snap buttons live INSIDE the title bar, so a title bar that
+        // has not attached takes them with it; the taskbar is drawn by the
+        // launcher and cannot go missing, so every one of them is here too.
+        menu.getMenu().add(0, 4, 1, getString(R.string.lx_snap_left));
+        menu.getMenu().add(0, 5, 2, getString(R.string.lx_snap_right));
+        menu.getMenu().add(0, 6, 3, getString(R.string.lx_snap_halfw));
+        menu.getMenu().add(0, 2, 4, getString(R.string.lx_close_app));
+        menu.getMenu().add(0, 3, 5, getString(R.string.lx_app_info));
         menu.setOnMenuItemClickListener(item -> {
             String pkg = app.component.getPackageName();
-            if (item.getItemId() == 1) {
+            if (item.getItemId() == 4 || item.getItemId() == 5 || item.getItemId() == 6) {
+                final int taskId = CaptionService.taskFor(pkg);
+                if (taskId < 0) {
+                    Toast.makeText(this, getString(R.string.wb_not_running, app.label),
+                            Toast.LENGTH_SHORT).show();
+                } else if (item.getItemId() == 4) {
+                    CaptionService.snapTask(taskId, SnapZones.LEFT);
+                } else if (item.getItemId() == 5) {
+                    CaptionService.snapTask(taskId, SnapZones.RIGHT);
+                } else {
+                    // "Half": two windows, one on each half — the second snap
+                    // that makes the pair. Cheap, and it is what dragging two
+                    // windows to the edges does on Windows.
+                    CaptionService.snapTask(taskId, SnapZones.RIGHT);
+                    Toast.makeText(this, getString(R.string.lx_snap_done), Toast.LENGTH_SHORT).show();
+                }
+            } else if (item.getItemId() == 1) {
                 // The window caption's ⤢ button only ever maximizes — One UI
                 // never turns it into a restore button on this display — so
                 // this is the way back to a windowed size. The PC side knows

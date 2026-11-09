@@ -1984,12 +1984,89 @@ fn reconcile_audio_session(app: &AppHandle, serial: &str) {
     }
 
     match start_mirror(app.clone(), audio_companion_options(serial, dup)) {
-        Ok(_) => log::info!(
-            "audio [{serial}] forwarding to this computer ({})",
-            if dup { "phone keeps playing too" } else { "phone goes silent" }
-        ),
+        Ok(info) => {
+            log::info!(
+                "audio [{serial}] forwarding to this computer ({})",
+                if dup { "phone keeps playing too" } else { "phone goes silent" }
+            );
+            // …and then WATCH it. A capture the phone refuses does not fail
+            // here: scrcpy starts, prints why in its own output and exits a
+            // second later, and the only trace left was a log line nobody
+            // reading the desktop would ever look for. That is exactly how
+            // "there is no sound on the computer" arrives with no error
+            // anywhere. Two seconds after the spawn, a companion that is gone
+            // is either retried on the other capture path or reported.
+            if dup {
+                watch_audio_companion(app, serial, info.pid);
+            }
+        }
         Err(e) => log::warn!("audio [{serial}] companion did not start: {e}"),
     }
+}
+
+/// Whether the session `key` is still running, and what it last printed.
+///
+/// `None` for "no such session"; the tail is empty when it says nothing, which
+/// is itself the answer for a scrcpy that was killed rather than one that
+/// refused.
+fn session_liveness(app: &AppHandle, key: &str) -> Option<(bool, u32, String)> {
+    let state = app.state::<MirrorState>();
+    let map = state.0.lock().unwrap();
+    let s = map.get(key)?;
+    let alive = s
+        .child
+        .lock()
+        .unwrap()
+        .try_wait()
+        .map(|st| st.is_none())
+        .unwrap_or(false);
+    Some((alive, s.pid, output_tail(&s.output, 14)))
+}
+
+/// A copy of the phone's own sound is only worth having if the phone's
+/// playback capture actually starts.
+///
+/// `--audio-dup` is not a switch we own: it needs Android 13's playback capture,
+/// the app being captured must permit it, and a second capture on the same
+/// device can be refused outright. None of those refusals reaches this side as
+/// an error — they are a scrcpy process that exits about a second after it
+/// starts. So: wait, look, and if it is gone, come back on the other path
+/// (`--audio-source=playback` without duplication, the shape every Android 11+
+/// phone supports), which at worst moves the sound to the computer instead of
+/// copying it. If that fails too, say so where a person can see it.
+fn watch_audio_companion(app: &AppHandle, serial: &str, pid: u32) {
+    let app = app.clone();
+    let serial = serial.to_string();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(2600));
+        let key = format!("{serial}|audio");
+        let Some((alive, live_pid, tail)) = session_liveness(&app, &key) else {
+            return;                         // stopped on purpose in the meantime
+        };
+        if live_pid != pid {
+            return;                         // a newer companion owns the key now
+        }
+        if alive {
+            log::info!("audio [{serial}] the duplicate-capture companion is up");
+            return;
+        }
+        log::warn!(
+            "audio [{serial}] the phone refused the duplicated capture — retrying without it:\
+\n{tail}"
+        );
+        let _ = stop_mirror(app.clone(), key.clone());
+        let _guard = audio_lock();
+        if !sound_shown_here(&app, &serial) {
+            return;
+        }
+        match start_mirror(app.clone(), audio_companion_options(&serial, false)) {
+            Ok(_) => log::info!(
+                "audio [{serial}] no duplication available on this phone — sound now comes here \
+                 only (the phone goes silent while it does)"
+            ),
+            Err(e) => log::warn!("audio [{serial}] the second capture path failed too: {e}"),
+        }
+    });
 }
 
 /// Phones whose apps are open in windows of their own (apps/mod.rs). Their

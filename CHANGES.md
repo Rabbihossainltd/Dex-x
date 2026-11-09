@@ -128,6 +128,22 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.4 — why the title bars were never there, and why the computer was silent
+
+0.7.3 changed the *layout* of the caption bar and the *storage* of the sound choice.
+Both were real bugs and both were the wrong floor: the caption bar was not being
+drawn at all, so no layout inside it could matter, and the audio companion was
+competing with the desktop session for the phone's one capture, so no preference
+could make the loser win. This release goes after the two actual causes.
+
+| # | Reported | The cause | Fix |
+| --- | --- | --- | --- |
+| 8 | "caption button o nai … resize o kora jai na" — on **every** window | Every title bar this project has ever drawn comes from `CaptionService`, which is an **accessibility service**: it needs the phone to bind it *and* to hand it the window list of a display it does not own. Android 13+ keeps a sideloaded app's service switched off behind "Allow restricted settings"; some OEMs refuse to bind one after a reinstall; and a bound service can be given an empty window list for a secondary display. All three fail silently, and all three leave the platform's own title bar on screen — which reads as "the feature was never built". Resize lived *in* that bar (8 dp edge bands, the ⤡ grip), so it vanished with it. | **A second renderer that needs none of it.** `CaptionFallback` takes the task list from the window daemon over the same socket everything else uses, reserves each window's strip with the daemon's `STRIP` verb, and draws the bar as a plain `TYPE_APPLICATION_OVERLAY` window out of the launcher process — the one overlay path this app is known to have, because the taskbar is drawn that way every session. It has — ▢ ✕, drag-to-move, and right/bottom/corner resize bands. It draws **only** the windows the accessibility caption has left undressed for four seconds, and hands each one back the moment the real caption dresses it, so there is never a second title bar. |
+| 8 | the failure was invisible | Nothing anywhere said which of the three had happened. | A red **No title bars** pill in the tray whenever the caption cannot draw, and a tap that says which one it is: the phone has not enabled the service (with the exact route out of "restricted settings"), the computer's window helper is not answering (with a Retry that asks the computer to start it again), or the phone is not giving us this display's window list (and the plain bars are in use). |
+| 8 | "resize o kora jai na" | Resize existed only as the caption's own edge bands. | Same bands in the fallback bar, **and** a taskbar app menu with **Snap left / Snap right / Snap to a half** — geometry that does not depend on a title bar existing at all. |
+| 4 | "default desktop a audio hoi nai alada alada" | The desktop session was started with `audio: true`, so scrcpy captured the phone's sound for the desktop window — **and** `reconcile_audio_session` started a second scrcpy (`--audio-source=playback --audio-dup`) to do the same. Two captures of one device: whichever loses exits about a second after it starts, with its reason in a log line nobody listening for sound would ever read, and the desktop is silent with no error anywhere. | One owner: the desktop window is now started with `--no-audio` and sound comes **only** from the companion. And the companion is **watched**: 2.6 s after it starts, if it is gone, its own output tail is logged and it is retried on the other capture path (`--audio-source=playback` without duplication — every Android 11+ phone has it, at the cost of the phone going silent *while it plays here*). Both attempts appear in the log with the exact command line scrcpy was given. |
+| — | APK size | Two 23 KB PNG layers of the launcher icon were dead: the adaptive icon references the **vector** `ic_launcher_foreground`/`_monochrome`, and the nodpi rasters were a second copy of the same art that aapt shipped anyway. | Deleted. The APK is smaller than 0.7.3's despite this release adding code. |
+
 ## v0.7.3 — the three buttons, sound that an old preference cannot silence, and a real About
 
 Everything here comes from one screenshot and one list of ten verdicts, and most of them

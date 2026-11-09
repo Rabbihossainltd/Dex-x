@@ -258,6 +258,105 @@ public final class CaptionService extends AccessibilityService {
         s.wm.post(() -> s.wm.resize(display, taskId, left, top, right, bottom, px));
     }
 
+    /**
+     * Snap a task by id, from OUTSIDE the service — the taskbar's app menu.
+     *
+     * <p>This exists because the caption bar is the only thing that used to be
+     * able to resize a window, and a caption that has not attached (an
+     * accessibility service the phone did not bind, a daemon that is not
+     * answering) then takes snap, maximise and resize with it. The taskbar is
+     * drawn by the launcher itself and cannot go missing, so it carries a
+     * second, independent way to every one of them.
+     */
+    static void snapTask(int taskId, int zone) {
+        CaptionService s = live;
+        if (s == null || s.wm == null) return;
+        WmClient.Task t = s.tasks.get(taskId);
+        if (t == null) return;
+        s.snapTo(t, zone);
+    }
+
+    /** The first task id of {@code pkg} on the desktop, or -1. */
+    static int taskFor(String pkg) {
+        CaptionService s = live;
+        if (s == null || pkg == null) return -1;
+        for (WmClient.Task t : s.tasks.values()) {
+            if (pkg.equals(t.pkg)) return t.taskId;
+        }
+        return -1;
+    }
+
+    /**
+     * Is there a caption service able to draw a title bar right now?
+     *
+     * <p>Three separate things have to be true and each fails silently on its
+     * own: the accessibility service has to be BOUND by the phone (on Android 13
+     * and later a sideloaded app's service stays unbound until "Allow restricted
+     * settings" is tapped), the window daemon has to answer, and the desktop
+     * display has to be known. The launcher asks this once a second and shows a
+     * red pill in the tray when the answer is no, because the failure the user
+     * sees — a window wearing the platform's own buttons — looks exactly like
+     * the feature never existing.
+     *
+     * @return null when all is well, otherwise the reason, as a string key
+     *         ("service" / "daemon")
+     */
+    static String problem() {
+        CaptionService s = live;
+        if (s == null || !s.wmReachable()) return "service";
+        if (s.desktopDisplayId < 0) return "daemon";
+        if (s.stalled()) return "nostrip";
+        return null;
+    }
+
+    /**
+     * Windows on the desktop that have been waiting for a title bar for longer
+     * than any host could reasonably take to turn up.
+     *
+     * <p>This is the third failure and the quietest: the service is bound, the
+     * daemon answers, and the phone still hands us an empty window list for a
+     * display it does not own. Nothing throws, nothing is logged by the system,
+     * and every window quietly keeps the platform's title bar. Four seconds is
+     * many times the 1.5 s curtain.
+     */
+    boolean stalled() {
+        long now = SystemClock.uptimeMillis();
+        for (Long since : unhostedSince.values()) {
+            if (since != null && now - since > 4000) return true;
+        }
+        return false;
+    }
+
+    /** This one task has waited past the grace for a title bar — see {@link #stalled()}. */
+    static boolean stalledTask(int taskId) {
+        CaptionService s = live;
+        if (s == null) return true;
+        Long since = s.unhostedSince.get(taskId);
+        return since != null && SystemClock.uptimeMillis() - since > 4000;
+    }
+
+    /**
+     * Whether this service can dress windows at all — bound, answering, and
+     * with a desktop display to dress. Not the same question as {@link #problem()}:
+     * that one is what the tray's pill shows, this one is what the fallback
+     * renderer asks before it takes a window over.
+     */
+    static boolean captionAvailable() {
+        CaptionService s = live;
+        return s != null && s.wmReachable() && s.desktopDisplayId >= 0;
+    }
+
+    /** A real caption of ours is on this task right now. */
+    static boolean dressedTask(int taskId) {
+        CaptionService s = live;
+        return s != null && (s.captions.get(taskId) != null || s.floating.get(taskId) != null);
+    }
+
+    /** Whether the last daemon call got through — cheap, no socket work. */
+    boolean wmReachable() {
+        return wm != null && wm.reachable();
+    }
+
     /** A task's rect on the display — {left, top, right, bottom} — or null when it is not one we track. */
     static int[] taskRect(int taskId) {
         CaptionService s = live;
@@ -436,6 +535,19 @@ public final class CaptionService extends AccessibilityService {
      * runs every pass, and if the shell's caption turns up later the bar rebuilds onto it.
      */
     private final Map<Integer, Long> hostWaitSince = new HashMap<>();
+
+    /**
+     * Tasks that have been waiting for a bar for long enough that something is
+     * wrong rather than merely slow — see {@link #problem()}.
+     *
+     * The caption can fail in a way that leaves the service bound and healthy:
+     * the phone hands us an empty window list for this display, so pickHost finds
+     * nothing, hostOnAppWindow finds nothing, and every window keeps the
+     * platform's own title bar forever while the service reports no error at
+     * all. Four seconds is many times the 1.5 s curtain, so a task still unhosted
+     * after that is not going to be hosted by waiting.
+     */
+    private final Map<Integer, Long> unhostedSince = new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
      * How long a task may go without a shell caption window before we host on its app
@@ -916,11 +1028,23 @@ public final class CaptionService extends AccessibilityService {
             // checked on every pass even for a task already wearing an app-window bar, so
             // a caption that turns up late is adopted rather than left drawing over us.
             AccessibilityWindowInfo host = pickHost(windows, t);
+            if (host == null && !CaptionFallback.hasBar(t.taskId)) {
+                if (!unhostedSince.containsKey(t.taskId)) {
+                    unhostedSince.put(t.taskId, SystemClock.uptimeMillis());
+                }
+            } else {
+                unhostedSince.remove(t.taskId);
+            }
             if (host == null) {
                 host = hostOnAppWindow(windows, t);   // null until the grace runs out
             } else {
                 hostWaitSince.remove(t.taskId);
                 hostDisplays.add(display);
+            }
+            // A task whose bar comes from the launcher's own overlay is done:
+            // it needs no host, no strip juggling and no patience from here.
+            if (CaptionFallback.hasBar(t.taskId)) {
+                unhostedSince.remove(t.taskId);
             }
             if (host != null) captionHeights.put(t.taskId, measureCaption(host));
             final int px = captionHeight(t.taskId);
@@ -938,7 +1062,8 @@ public final class CaptionService extends AccessibilityService {
             // caller reads false as "still waiting" — which held the reconcile loop at
             // its 60 ms busy cadence for the rest of the session on a desktop where one
             // window had no host. That is a phone kept warm for nothing.
-            boolean ok = syncCaption(t) || floating.get(t.taskId) != null;
+            boolean ok = syncCaption(t) || floating.get(t.taskId) != null
+                    || CaptionFallback.hasBar(t.taskId);
             if (host == null) {
                 // The host window is not in the accessibility list this pass. On One UI
                 // that is the platform's caption blinking out; do NOT fall back to the app

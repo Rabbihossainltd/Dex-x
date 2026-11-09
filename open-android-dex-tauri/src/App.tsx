@@ -59,7 +59,17 @@ function desktopOptions(d: DeviceInfo): MirrorOptions {
     // the Rust side unless a rate was picked in Settings
     videoBitRateMbps: 8,
     maxFps: 0,
-    audio: true,
+    // The desktop window carries NO audio of its own.
+    //
+    // Two scrcpy sessions capturing one phone's sound is one too many: the
+    // desktop's own capture and the audio companion (scrcpy.rs's
+    // reconcile_audio_session, which asks for --audio-source=playback
+    // --audio-dup so the phone keeps playing too) compete for the same device
+    // capture, and whichever loses does so by exiting a second after it starts
+    // — silently, from the point of view of anyone listening. So the sound has
+    // exactly one owner: the companion. See its `spawning:` line in the log for
+    // the exact command line it was given.
+    audio: false,
     audioPlayback: false,
     stayAwake: true,
     // stayAwake only holds while the phone charges; over Wi-Fi on battery an
