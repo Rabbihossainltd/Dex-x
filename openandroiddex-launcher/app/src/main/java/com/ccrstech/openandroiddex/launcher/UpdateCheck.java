@@ -7,8 +7,8 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.net.Uri;
-import android.view.View;
 import android.widget.Button;
+import android.widget.Toast;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -121,6 +121,54 @@ final class UpdateCheck {
         } catch (Exception ignored) {
             // No browser: the address of the releases page is in the About block.
         }
+    }
+
+    /**
+     * Ask now, and say what came back — for the About dialog's own button.
+     *
+     * <p>Deliberately separate from {@link #maybe}: that one keeps quiet on
+     * purpose (no signal, nothing newer, asked already today), and silence is
+     * exactly what makes a check the person pressed look broken. This runs on
+     * the same background thread and reports all three outcomes.
+     */
+    static void checkNow(final Activity activity) {
+        final String current = versionName(activity);
+        if (activity.isFinishing() || activity.isDestroyed()) return;
+        Toast.makeText(activity, R.string.upd_checking, Toast.LENGTH_SHORT).show();
+        Thread t = new Thread(() -> {
+            String json = get(API);
+            String message;
+            final String[] link = new String[1];
+            if (json == null) {
+                message = activity.getString(R.string.upd_failed);
+            } else {
+                String tag = field(json, "tag_name");
+                String latest = tag == null ? "" : (tag.startsWith("v") ? tag.substring(1) : tag);
+                String url = field(json, "html_url");
+                if (latest.isEmpty()) {
+                    message = activity.getString(R.string.upd_failed);
+                } else if (compare(latest, current) > 0) {
+                    message = activity.getString(R.string.upd_found, latest, current);
+                    link[0] = url != null && url.startsWith("https://") ? url : RELEASES_PAGE;
+                } else {
+                    message = activity.getString(R.string.upd_current, current);
+                }
+            }
+            final String text = message;
+            final String openUrl = link[0];
+            activity.runOnUiThread(() -> {
+                if (activity.isFinishing() || activity.isDestroyed()) return;
+                new AlertDialog.Builder(activity)
+                        .setMessage(text)
+                        .setPositiveButton(openUrl != null ? R.string.upd_open : android.R.string.ok,
+                                (d, w) -> {
+                                    if (openUrl != null) open(activity, openUrl);
+                                })
+                        .show();
+            });
+        }, "update-check-now");
+        t.setDaemon(true);
+        t.start();
     }
 
     // ── the wire ───────────────────────────────────────────────────────────

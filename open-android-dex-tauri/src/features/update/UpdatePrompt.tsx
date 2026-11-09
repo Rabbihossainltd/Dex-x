@@ -33,6 +33,46 @@ const TIMEOUT_MS = 6000;
 
 type Release = { version: string; url: string; name: string };
 
+/** What a check found. `null` while one is in flight. */
+export type CheckResult =
+  | { kind: "newer"; version: string; url: string; name: string }
+  | { kind: "current"; version: string }
+  | { kind: "failed"; why: string };
+
+/**
+ * Ask the repository what its newest release is, once, and say what came back.
+ *
+ * The same request the prompt makes, with the two guards the prompt needs
+ * (once a day, once per version) deliberately left to the prompt: a check the
+ * person asked for must answer every time, including "you are up to date" and
+ * "could not reach it" — the silence that keeps a background check quiet is
+ * exactly what makes a manual one look broken.
+ */
+export async function checkNow(): Promise<CheckResult> {
+  const mine = await getVersion().catch(() => "");
+  if (!mine) return { kind: "failed", why: "this build has no version" };
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(API, {
+      headers: { Accept: "application/vnd.github+json" },
+      signal: controller.signal,
+    });
+    if (!res.ok) return { kind: "failed", why: `GitHub answered ${res.status}` };
+    const json = (await res.json()) as { tag_name?: string; html_url?: string; name?: string };
+    const tag = json.tag_name ?? "";
+    const latest = tag.startsWith("v") ? tag.slice(1) : tag;
+    if (!latest) return { kind: "failed", why: "the release has no version" };
+    const url = (json.html_url ?? "").startsWith("https://") ? json.html_url! : PAGE;
+    if (compare(latest, mine) > 0) return { kind: "newer", version: latest, url, name: json.name ?? "" };
+    return { kind: "current", version: mine };
+  } catch (e) {
+    return { kind: "failed", why: String(e) };
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 export function UpdatePrompt() {
   const [release, setRelease] = useState<Release | null>(null);
   const [current, setCurrent] = useState("");

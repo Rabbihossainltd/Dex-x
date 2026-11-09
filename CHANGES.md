@@ -128,6 +128,27 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.3 — the three buttons, sound that an old preference cannot silence, and a real About
+
+Everything here comes from one screenshot and one list of ten verdicts, and most of them
+were the same three failures: a caption bar missing the buttons a Windows window is judged
+by, a sound setting deleted from the UI but not from the config, and a logo that was new
+where it was generated and old where it was hand-copied.
+
+| # | Reported | What was actually wrong | Fix |
+| --- | --- | --- | --- |
+| 8 | "minimise / maximise / close are not there — the screenshot shows two buttons" | The bar appended every button to a horizontal row whose FIRST child was the title with `weight = 1`. A `LinearLayout` gives the weighted child whatever is left and clips the rest from the RIGHT, so a narrow window lost buttons, and which ones depended on the width it happened to have. | `barView` builds the button set as ONE right-aligned cluster with fixed widths; the title is what gives up room. Minimise, maximise/restore and close are always present, in Windows order, close at the very edge. Snaps and the resize grip are the extras that go first, and only on a bar too narrow for them. The maximise glyph follows the window (▢ / ❐) on every poll. |
+| 8 | "the recent app goes from the taskbar" — a minimised app cannot be got back | A taskbar tile click was `focusPackage` → `wm.front()`, and `front()` only RAISES. `onMinimise` HIDES the task, so a hidden window's tile raised something nobody could see. | `focusPackage` un-hides first (`wm.show`, the same call `restoreTask` makes) and drops the id from the minimised set; `refreshOpenApps` asks it before falling back to `launch`. |
+| 4 | "audio still not fixed — sound only on the mobile" | `stored_audio_forwarding` read the two legacy keys with `true` defaults — but an installation that had once picked "phone only" still had `stream_audio=off` stored, and nothing in the UI could turn it back. The setting was deleted; its persisted state was not. | The stored answer is no longer read: `stored_audio_forwarding` returns `(true, true)`. The computer always plays the desktop's sound and `--audio-dup` keeps the phone's own. The rows that offered a source are gone from both sound menus; what is left is the phone's own outputs. |
+| 1 | "no About button — just 'made by Rabbi Hossain'" | The About block was text, not a control. | **Scan a code** and **About** are buttons under the card. About opens a dialog with the author, the site, **info@rabbihossainltd.online**, the version, the licence — and **Check for updates**. |
+| 3 | "the apk has no scan option" | QR pairing lives in the PC app (a phone cannot scan its own screen), and the phone had no route to its own pairing scanner. | **Scan a code** on the connect screen: the three steps and a button to Developer options, where *Pair device with a QR code* is. Written as instructions, not a promise — that scanner is the system's and no deep link reaches it on every OEM. |
+| 7 | "no popup in the new release" | The check compares the newest release with `versionName` — and the build WAS the newest release, so saying nothing was correct. Correct and indistinguishable from broken. | A check the person asked for always answers: **Check for updates** in the phone's About dialog and in the PC's menu — "newest build", "X is out", or "could not reach it". The daily background check still stays quiet. |
+| 2 | "the logo is not changed everywhere in the exe" | The icons came from a 1024 tile whose wordmark is unreadable at 16 px, and `icon.ico` held one image, so Windows scaled it down into mud. `public/logo.png` was a different crop again. | One source: the **X**, cut clean of the dash, on the white tile. Small sizes are the X (16/24/30/32/44/48/50), large ones the full wordmark (64–310), `icon.ico` carries seven images, and `resources/icon/scrcpy.png` plus `public/logo*.png` come from the same tile. |
+| 5 | "keyboard fixed; password flag not" | `VIRTUAL_DISPLAY_FLAG_SECURE` needs `CAPTURE_SECURE_VIDEO_OUTPUT`, a signature|privileged permission the shell does not hold, so the phone refuses and the display is made without it. | Unchanged, and stated plainly: a window that marks itself secure stays blank unless the phone's shell holds that permission, which no app-side code can obtain. The request and its one-line reason stay in the log. |
+| 9 | "ok" | — | Nothing to do. |
+
+---
+
 ## Next, in order
 
 1. **Taskbar auto-hide with hover reveal** — what the reporter of the taskbar

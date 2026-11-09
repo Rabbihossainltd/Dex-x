@@ -145,6 +145,16 @@ public final class CaptionService extends AccessibilityService {
      * @return false when no live task of that package is known — the caller falls
      *         back to whatever it would have done.
      */
+    /**
+     * Bring {@code pkg}'s window to the front — un-hiding it first, if that is
+     * why it is not there.
+     *
+     * <p>This is what a taskbar tile click is. It used to be `front()` alone,
+     * and `front()` only raises: a window the ⛔ of its own caption had put
+     * away stayed hidden, so clicking its tile on the taskbar did nothing at
+     * all — the app was on the bar, open, and unreachable. Un-hide is the
+     * same call {@link #restoreTask} makes, so the two can never disagree.
+     */
     static boolean focusPackage(String pkg) {
         CaptionService s = live;
         if (s == null || s.wm == null || pkg == null) return false;
@@ -152,7 +162,13 @@ public final class CaptionService extends AccessibilityService {
             if (!pkg.equals(t.pkg)) continue;
             final int display = t.displayId;
             final int id = t.taskId;
-            s.wm.post(() -> s.wm.front(display, id));
+            final boolean hidden = s.minimised.containsKey(id);
+            if (hidden) s.minimised.remove(id);
+            s.wm.post(() -> {
+                if (hidden) s.wm.show(display, id);
+                else s.wm.front(display, id);
+            });
+            if (hidden) s.publishMinimised();
             return true;
         }
         return false;
@@ -481,6 +497,10 @@ public final class CaptionService extends AccessibilityService {
          * flag is what lets syncCaption notice and ask for a rebuild.
          */
         boolean snaps;
+        /** The maximise button, so its glyph can follow the window between ▢ and ❐. */
+        TextView maxBtn;
+        /** Whether the window fills the desktop right now — Windows draws restore-down then. */
+        boolean maxed;
         /** Accessibility window this is attached to; changes when the host is recreated. */
         int windowId;
     }
@@ -1314,6 +1334,14 @@ public final class CaptionService extends AccessibilityService {
         Caption c = captions.get(task.taskId);
         if (c == null) return false;
         c.title.setText(labelFor(task));
+        // ▢ or ❐, as Windows draws it: the glyph is the state, and this runs on
+        // every poll, so a window maximised by anything — this button, the
+        // taskbar's menu, a snap — wears the right one a pass later.
+        boolean maxed = isMaxed(task);
+        if (maxed != c.maxed && c.maxBtn != null) {
+            c.maxed = maxed;
+            c.maxBtn.setText(maxed ? "❐" : "▢");
+        }
 
         int width = task.right - task.left;
         int height = captionHeight(task.taskId);
@@ -1439,53 +1467,58 @@ public final class CaptionService extends AccessibilityService {
         bar.addView(c.title, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        // Snap to half the display, left or right — the same controls the commercial DeX
-        // exposes from its title-bar dropdown, as explicit buttons here (a PopupWindow inside
-        // a SurfaceControlViewHost on a virtual display is unreliable; buttons are not).
+        // ── The three a Windows window always has ─────────────────────────
         //
-        // The widget detour's window is an alert box waiting for an answer, so it gets none
-        // of them. Snapping and maximising resize a dialog that will not grow, and — is
-        // worse than useless: onMinimise HIDES the task, a hidden dialog delivers no result,
-        // and the add would hang with an allocated widget id nobody can reach. ✕ stays,
-        // because ours is a real close (wmd removeTask, not One UI's hide), which the detour
-        // turns into a clean cancel.
+        // Minimise, maximise/restore, close: in that order, right-aligned, with
+        // the close at the very edge — the arrangement every Windows user's hand
+        // already knows. They are added as ONE cluster with fixed widths, and
+        // the title is what gives up room, never them: this bar used to append
+        // the buttons straight to the row, and a narrow window clipped them
+        // from the right, which is how a window came to wear a ✕ and nothing
+        // else.
+        //
+        // The snap buttons and the resize grip are extras and go first when the
+        // window is too narrow for the set.
         final boolean detour = WidgetDetourActivity.isDetourTask(task.taskId);
         final int btnPx = buttonWidth();
-        // A Horizontal LinearLayout clips from its RIGHT end when it runs out of
-        // room, and the title next to it has weight 1 — so a narrow window used
-        // to eat the buttons right to left and end up wearing a ✕ and nothing
-        // else. That is exactly how a window comes to have "no minimise
-        // option". Decide from the surface's own width instead: the close, the
-        // minimise, the maximise and the resize grip are fixed costs, and the
-        // two snap buttons are given up first when there is no room for them.
-        final boolean roomForSnaps = !detour && roomForSnaps(width);
-        c.snaps = roomForSnaps;
+        final boolean wide = !detour && roomForSnaps(width);
+
+        LinearLayout cluster = new LinearLayout(ui);
+        cluster.setOrientation(LinearLayout.HORIZONTAL);
+        cluster.setGravity(Gravity.CENTER_VERTICAL);
+        cluster.setPadding(0, 0, px(4), 0);
+
+        if (wide) {
+            cluster.addView(button(ui, "◧", false, v -> onSnapLeft(task)), buttonParams(height));
+            cluster.addView(button(ui, "◨", false, v -> onSnapRight(task)), buttonParams(height));
+        }
+        c.snaps = wide;
         if (!detour) {
-            if (roomForSnaps) {
-                bar.addView(button(ui, "◧", false, v -> onSnapLeft(task)), buttonParams(height));
-                bar.addView(button(ui, "◨", false, v -> onSnapRight(task)), buttonParams(height));
-            }
-            bar.addView(button(ui, "—", false, v -> onMinimise(task)), buttonParams(height));
-            // ▢ takes a long press as well: the snap layouts. The click stays
-            // maximise, because that is what the button has always done and
-            // what the glyph says — the long press is the second thing it can
-            // do, not a replacement.
-            TextView maxBtn = button(ui, "▢", false, v -> onMaximise(task));
+            cluster.addView(button(ui, "—", false, v -> onMinimise(task)), buttonParams(height));
+            // ▢ (or ❐ when the window already fills the desktop, as Windows
+            // draws it). The click is maximise/restore; a long press is the
+            // snap-layout picker, which is the second thing the button can do
+            // rather than a replacement for the first.
+            TextView maxBtn = button(ui, c.maxed ? "❐" : "▢", false, v -> onMaximise(task));
+            c.maxBtn = maxBtn;
             maxBtn.setOnLongClickListener(v -> {
                 showLayoutPicker(task, v);
                 return true;
             });
-            bar.addView(maxBtn, buttonParams(height));
+            cluster.addView(maxBtn, buttonParams(height));
         }
+        c.maxed = isMaxed(task);
+        if (c.maxBtn != null) c.maxBtn.setText(c.maxed ? "❐" : "▢");
         // Resize, where the hand already is: a grip in the title bar that pulls
-        // the bottom-right corner. The window's own bottom-right corner is not
-        // reachable — our surface is the strip — so the corner comes to the
-        // pointer instead. See CaptionChrome for the two edge bands as well.
-        if (!detour) {
-            bar.addView(CaptionChrome.grip(ui, resizerFor(task), "⤡", px(13), theme.textDim, btnPx),
+        // the bottom-right corner. The window's own corner is not reachable — our
+        // surface is the strip — so the corner comes to the pointer instead.
+        if (wide) {
+            cluster.addView(CaptionChrome.grip(ui, resizerFor(task), "⤡", px(13), theme.textDim, btnPx),
                     buttonParams(height));
         }
-        bar.addView(button(ui, "✕", true, v -> onClose(task)), buttonParams(height));
+        cluster.addView(button(ui, "✕", true, v -> onClose(task)), buttonParams(height));
+        bar.addView(cluster, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT));
         bar.setOnTouchListener(dragHandler(c, task, bar));
         return bar;
     }

@@ -1082,4 +1082,18 @@ If you switch this off again later, Android force-closes Linux and the desktop r
     <string name="lx_clipboard_empty">Nothing copied on the phone yet. What you copy here is kept here.</string>
     <string name="lx_clipboard_copied">Copied</string>
     <string name="lx_clipboard_clear">Clear history</string>
+    <!-- The two buttons under the connect card. -->
+    <string name="cx_scan">Scan a code</string>
+    <string name="cx_about">About</string>
+    <string name="cx_scan_title">Pair with the code on the computer</string>
+    <string name="cx_scan_body">1. On the computer, choose Wi-Fi and then Scan a code — it draws a QR code.\n\n2. On this phone, open Developer options, tap Wireless debugging, then Pair device with a QR code.\n\n3. Point the phone at the computer screen. Pairing is done once; afterwards the phone is found by itself.</string>
+    <string name="cx_scan_open">Open Developer options</string>
+    <string name="cx_about_contact">info@rabbihossainltd.online</string>
+    <!-- The update check, and the answer to one the person asked for. -->
+    <string name="upd_check">Check for updates</string>
+    <string name="upd_checking">Checking…</string>
+    <string name="upd_current">You are on the newest build (%1$s).</string>
+    <string name="upd_found">Dex-X %1$s is out — you have %2$s. Open the release page to download it.</string>
+    <string name="upd_open">Open the release</string>
+    <string name="upd_failed">Could not reach the release page. Check the connection and try again.</string>
 </resources>

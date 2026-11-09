@@ -171,21 +171,14 @@ pub fn menu(mode: Mode, sdk: u32, phone: Option<&PhoneSound>) -> Vec<Item> {
         Mode::Both if !can_both => Mode::Computer,
         m => m,
     };
-    let mut items = vec![
-        Item::Choice {
-            label: if can_forward { COMPUTER_ONLY.into() } else { format!("{COMPUTER_ONLY} (needs Android 11)") },
-            checked: mode == Mode::Computer,
-            enabled: can_forward,
-            choice: Choice::Computer,
-        },
-        Item::Choice {
-            label: if can_both { COMPUTER_AND_PHONE.into() } else { format!("{COMPUTER_AND_PHONE} (needs Android 13)") },
-            checked: mode == Mode::Both,
-            enabled: can_both,
-            choice: Choice::Both,
-        },
-        Item::Separator,
-    ];
+    // No "computer only" and no "both" rows: the computer always plays the
+    // desktop's sound and the phone always keeps its own (scrcpy.rs,
+    // stored_audio_forwarding). What is left is the phone's own outputs — a
+    // choice of where the HANDSET plays, which is a speaker picker, not an
+    // audio-source switch. `can_forward`/`can_both` stay for the fallback line
+    // below, which still has to tell a phone below 13 apart.
+    let _ = (can_forward, can_both);
+    let mut items: Vec<Item> = Vec::new();
     let Some(phone) = phone.filter(|p| p.can_pin) else {
         items.push(Item::Choice { label: PHONE_ONLY.into(), checked: mode == Mode::Phone, enabled: true, choice: Choice::Phone(None) });
         return items;

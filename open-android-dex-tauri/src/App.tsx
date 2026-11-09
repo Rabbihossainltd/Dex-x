@@ -11,7 +11,7 @@ import { DesktopPage, type Method } from "./features/desktop/DesktopPage";
 import { deviceName, type AdbState, type LaunchMode, type Phase, type Progress } from "./features/desktop/model";
 import { useSessions } from "./features/mirror/useSessions";
 import { NotificationsBell } from "./features/notifications/NotificationsBell";
-import { UpdatePrompt } from "./features/update/UpdatePrompt";
+import { UpdatePrompt, checkNow } from "./features/update/UpdatePrompt";
 import { WirelessPanel } from "./features/wireless/WirelessPanel";
 import { ContextMenu, type ContextAction } from "./ui/ContextMenu";
 import { Icon } from "./ui/Icon";
@@ -108,6 +108,8 @@ export default function App() {
   /** Cable or Wi-Fi, on the connect screen. Wi-Fi first for someone who has used it before. */
   const [method, setMethod] = useState<Method>("usb");
   const [version, setVersion] = useState("");
+  /** A "Check for updates" the person asked for is in flight. */
+  const [updateBusy, setUpdateBusy] = useState(false);
   /**
    * Whether the one-shot attempt to reach a remembered phone has finished.
    * Nothing may conclude "no device" before it has: the whole point is that a
@@ -921,6 +923,29 @@ export default function App() {
               })}
             >
               Report a problem
+            </MenuItem>
+            <MenuItem
+              icon="refresh"
+              disabled={updateBusy}
+              onSelect={pick(() => {
+                // Asked for, so it always answers — including "you are up to
+                // date". The background check is the one that keeps quiet.
+                setUpdateBusy(true);
+                checkNow()
+                  .then((r) => {
+                    if (r.kind === "newer") {
+                      say(`Dex-X ${r.version} is out — opening the release page`, "info");
+                      openUrl(r.url).catch(() => {});
+                    } else if (r.kind === "current") {
+                      say(`You're on the newest build (${r.version})`, "ok");
+                    } else {
+                      say("Couldn't reach the release page", "bad", r.why);
+                    }
+                  })
+                  .finally(() => setUpdateBusy(false));
+              })}
+            >
+              {updateBusy ? "Checking…" : "Check for updates"}
             </MenuItem>
             {version && (
               <p className="flex items-center gap-2 px-2.5 pb-1 pt-1.5 text-[11px] text-[var(--ink-3)]">

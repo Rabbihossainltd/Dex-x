@@ -1767,10 +1767,17 @@ const PERF_BIT_RATE_MBPS: u32 = 4;
 /// commonest answer to "there is no sound" — MUST match DEF_AUDIO /
 /// DEF_AUDIO_DUP in the launcher's DexPrefs.
 fn stored_audio_forwarding(app: &AppHandle) -> (bool, bool) {
-    let map = load_config(app);
-    let forward = map.get("audio").map(|v| v != "off").unwrap_or(true);
-    let dup = map.get("audiodup").map(|v| v != "off").unwrap_or(true);
-    (forward, dup)
+    // Always both, and deliberately not a setting.
+    //
+    // These keys are still written by the launcher's old chooser, and an
+    // installation that had once picked "phone only" still carries
+    // `stream_audio=off` in its preferences. Honouring that would leave the
+    // computer silent for ever with no control anywhere to turn it back on —
+    // which is exactly the "sound only on the mobile" this replaced. So the
+    // stored answer is not read: the desktop's sound always comes here, and
+    // `--audio-dup` means the phone never loses its own.
+    let _ = app;
+    (true, true)
 }
 
 /// "Where sound plays", as (forward, duplicate), for the app windows' sound menu.

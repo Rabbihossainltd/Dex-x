@@ -4432,7 +4432,12 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
             });
             row.setOnClickListener(v -> {
                 dismissPopups();
-                launch(app); // relaunch = refocus
+                // A tile is a window that is already open: un-hide it if it
+                // was minimised, raise it otherwise. `launch` (an am start)
+                // does neither to a hidden task — the window stayed away and
+                // the click read as broken.
+                if (CaptionService.focusPackage(pkg)) return;
+                launch(app); // not on the display any more: start it again
             });
             panel.addView(row, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -5230,15 +5235,11 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         header.setPadding(dp(10), dp(4), dp(10), dp(6));
         panel.addView(header);
 
+        // No forwarding rows here any more: the computer always plays the
+        // desktop's sound while the phone keeps its own (--audio-dup), so there
+        // is no source to choose. What this flyout is for is the phone's own
+        // outputs — where the HANDSET plays.
         String mode = DexMedia.audioMode(this);
-        panel.addView(mediaRow(getString(R.string.lx_audio_computer),
-                DexMedia.AUDIO_COMPUTER.equals(mode),
-                () -> pickForwarding(DexMedia.AUDIO_COMPUTER)));
-        panel.addView(mediaRow(getString(R.string.lx_audio_both),
-                DexMedia.AUDIO_BOTH.equals(mode),
-                () -> pickForwarding(DexMedia.AUDIO_BOTH)));
-
-        panel.addView(mediaDivider());
 
         // The phone's own outputs. Which row is lit: only meaningful while
         // sound stays on the phone, and then it is the remembered pick when
@@ -5309,20 +5310,6 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         lp.bottomMargin = dp(4);
         divider.setLayoutParams(lp);
         return divider;
-    }
-
-    /**
-     * A forwarding pick: the mode does the work (the PC cycles its audio
-     * companion), and any phone-output pin is handed back so the phone half
-     * of "computer and phone" comes out of whatever the phone would use on
-     * its own. Best effort on the unpin: with nothing pinned the daemon
-     * answers ERR, which is the same outcome spelled differently.
-     */
-    private void pickForwarding(String mode) {
-        DexMedia.setAudioMode(this, mode);   // also retires the phone pick
-        if (qsWm == null) qsWm = new WmClient();
-        final WmClient client = qsWm;
-        client.post(client::audioRouteClear);
     }
 
     /**

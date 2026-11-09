@@ -7,6 +7,7 @@ import android.content.IntentFilter;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
+import android.app.AlertDialog;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -216,7 +217,30 @@ public class ConnectActivity extends android.app.Activity {
         actionLp.gravity = Gravity.CENTER_HORIZONTAL;
         card.addView(action, actionLp);
 
-        // ── About ──
+        // ── Two buttons, then the credits ──
+        //
+        // "Scan a code" is the pairing route the Wi-Fi panel's QR code is for:
+        // the computer puts the code on screen, and the phone's own pairing
+        // scanner reads it. That scanner belongs to the system (Settings >
+        // Developer options > Wireless debugging > Pair device with QR code),
+        // not to this app, and there is no public way to draw it ourselves —
+        // so the button opens it, with the three steps spelled out. Silently
+        // omitting the route is what made "the apk has no scan option" true.
+        LinearLayout extras = new LinearLayout(this);
+        extras.setOrientation(LinearLayout.HORIZONTAL);
+        extras.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams extrasLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        extrasLp.topMargin = dp(22);
+        col.addView(extras, extrasLp);
+
+        extras.addView(pill(getString(R.string.cx_scan), () -> scanToPair(false)));
+        LinearLayout.LayoutParams gapLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        gapLp.leftMargin = dp(10);
+        extras.addView(pill(getString(R.string.cx_about), this::showAbout), gapLp);
+
+        // ── About, the short form ──
         // Who made this, where to find them, and what the licences say. Part of
         // the same scrolling column, under everything else, so it is there when
         // someone looks for it and out of the way when they do not.
@@ -236,6 +260,118 @@ public class ConnectActivity extends android.app.Activity {
             return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
         } catch (Exception e) {
             return "";
+        }
+    }
+
+    /** One quiet, outlined button — the second tier under the card's action. */
+    private TextView pill(String label, Runnable onTap) {
+        TextView b = new TextView(this);
+        b.setText(label);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(13));
+        b.setTextColor(theme.text);
+        b.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        b.setPadding(dp(18), dp(9), dp(18), dp(9));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(theme.cardSolid);
+        bg.setCornerRadius(dp(11));
+        bg.setStroke(dp(1), theme.divider);
+        b.setBackground(bg);
+        b.setOnClickListener(v -> onTap.run());
+        return b;
+    }
+
+    /**
+     * About, as a dialog worth opening: the author, the site (a link), the
+     * contact, the version and the licence.
+     *
+     * <p>The column at the bottom of this screen is the one-line version —
+     * a phone that is plugged in should not have to scroll past a brochure.
+     * The button is for the person who taps on purpose.
+     */
+    private void showAbout() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(22), dp(18), dp(22), dp(6));
+
+        TextView title = new TextView(this);
+        title.setText("Dex-X " + versionName());
+        title.setTextColor(theme.text);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(19));
+        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        box.addView(title);
+
+        TextView by = new TextView(this);
+        by.setText(getString(R.string.cx_about_made) + " " + getString(R.string.cx_about_author));
+        by.setTextColor(theme.textDim);
+        by.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(13));
+        by.setPadding(0, dp(6), 0, 0);
+        box.addView(by);
+
+        TextView site = new TextView(this);
+        site.setText(getString(R.string.cx_about_site));
+        site.setTextColor(theme.accent);
+        site.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(14));
+        site.setPadding(0, dp(10), 0, 0);
+        site.setOnClickListener(v -> open(getString(R.string.cx_about_site_url)));
+        box.addView(site);
+
+        TextView mail = new TextView(this);
+        mail.setText(getString(R.string.cx_about_contact));
+        mail.setTextColor(theme.accent);
+        mail.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(14));
+        mail.setPadding(0, dp(8), 0, 0);
+        mail.setOnClickListener(v -> open("mailto:" + getString(R.string.cx_about_contact)));
+        box.addView(mail);
+
+        TextView licence = new TextView(this);
+        licence.setText(getString(R.string.cx_about_licence, versionName()));
+        licence.setTextColor(theme.textFaint);
+        licence.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(11));
+        licence.setLineSpacing(dp(2), 1f);
+        licence.setPadding(0, dp(14), 0, 0);
+        box.addView(licence);
+
+        new AlertDialog.Builder(this)
+                .setView(box)
+                .setPositiveButton(android.R.string.ok, null)
+                .setNeutralButton(R.string.upd_check, (d, w) -> UpdateCheck.checkNow(this))
+                .show();
+    }
+
+    /**
+     * Open the phone's own "pair with a QR code" scanner, or say how to reach it.
+     *
+     * <p>A developer-options screen is not public API, and the pairing scanner
+     * inside it has no intent of its own: every Android release moves the bricks
+     * under it, and a deep link that works on one OEM opens the wrong page on
+     * the next. So the intent below is the best-known one, and the dialog is the
+     * answer when it lands somewhere else — which is why it is written as
+     * instructions rather than as a promise.
+     */
+    private void scanToPair(boolean ignored) {
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.cx_scan_title))
+                .setMessage(getString(R.string.cx_scan_body))
+                .setPositiveButton(getString(R.string.cx_scan_open), (d, w) -> {
+                    try {
+                        startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS));
+                    } catch (Exception e) {
+                        try {
+                            startActivity(new Intent(android.provider.Settings.ACTION_SETTINGS));
+                        } catch (Exception ignored2) {
+                            // A phone with no Settings app is not a phone.
+                        }
+                    }
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void open(String url) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)));
+        } catch (Exception ignored) {
+            // No browser: the address is on screen either way.
         }
     }
 
