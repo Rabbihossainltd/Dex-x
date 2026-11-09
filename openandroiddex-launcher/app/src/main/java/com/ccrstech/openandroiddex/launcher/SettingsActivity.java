@@ -379,29 +379,29 @@ public class SettingsActivity extends Activity {
     private void buildNavs() {
         navs.clear();
         navs.add(new Nav(SEC_DISPLAY, R.string.st_nav_display, R.string.st_nav_display_sub,
-                "🎨", 0xFFa78bfa, new int[]{R.string.st_shell, R.string.st_shell_win11,
+                Glyphs.PALETTE, 0xFFa78bfa, new int[]{R.string.st_shell, R.string.st_shell_win11,
                 R.string.st_theme, R.string.st_theme_paper,
                 R.string.st_paper_texture, R.string.st_grain, R.string.st_glass,
                 R.string.st_blur, R.string.st_transparency, R.string.st_rounding,
                 R.string.st_display_size, R.string.st_display_size_keywords}));
         navs.add(new Nav(SEC_PERF, R.string.st_nav_perf, R.string.st_nav_perf_sub,
-                "⚡", 0xFFfacc15, new int[]{R.string.st_perf, R.string.st_perf_anim,
+                Glyphs.BOLT, 0xFFfacc15, new int[]{R.string.st_perf, R.string.st_perf_anim,
                 R.string.st_perf_effects, R.string.st_perf_stream}));
         navs.add(new Nav(SEC_LANGUAGE, R.string.st_nav_language, R.string.st_nav_language_sub,
-                "🌐", 0xFF2dd4bf, new int[]{R.string.st_language, R.string.st_font_style}));
+                Glyphs.GLOBE, 0xFF2dd4bf, new int[]{R.string.st_language, R.string.st_font_style}));
         navs.add(new Nav(SEC_WALLPAPER, R.string.st_nav_wallpaper, R.string.st_nav_wallpaper_sub,
-                "🖼", 0xFF60a5fa, new int[]{R.string.st_choose_wallpaper,
+                Glyphs.IMAGE, 0xFF60a5fa, new int[]{R.string.st_choose_wallpaper,
                 R.string.st_darkness}));
         navs.add(new Nav(SEC_WINDOWS, R.string.st_nav_windows, R.string.st_nav_windows_sub,
-                "🪟", 0xFFfb923c, new int[]{R.string.st_launch_mode,
+                Glyphs.GRID, 0xFFfb923c, new int[]{R.string.st_launch_mode,
                 R.string.st_window_size, R.string.st_icon_size,
                 R.string.st_window_memory}));
         navs.add(new Nav(SEC_NOTIFICATIONS, R.string.st_nav_notifications,
                 R.string.st_nav_notifications_sub,
-                "🔔", 0xFFf87171, new int[]{R.string.st_notif_show, R.string.st_notif_popup,
+                Glyphs.BELL, 0xFFf87171, new int[]{R.string.st_notif_show, R.string.st_notif_popup,
                 R.string.st_notif_calls, R.string.st_notif_access}));
         navs.add(new Nav(SEC_MOUSE, R.string.st_nav_mouse, R.string.st_nav_mouse_sub,
-                "➤", 0xFFf472b6, new int[]{R.string.st_cursor_style,
+                Glyphs.MOUSE, 0xFFf472b6, new int[]{R.string.st_cursor_style,
                 R.string.st_cursor_size, R.string.st_cursor_color, R.string.st_cursor_outline,
                 R.string.st_cursor_speed, R.string.st_cursor_render}));
         // No Touchpad page in this window.
@@ -412,13 +412,13 @@ public class SettingsActivity extends Activity {
         // desktop, and its gestures are configured there, on the pad itself. Two homes
         // for one setting is how the two drift apart.
         navs.add(new Nav(SEC_STREAM, R.string.st_nav_stream, R.string.st_nav_stream_sub,
-                "🎞", 0xFFf59e0b, new int[]{R.string.st_resolution, R.string.st_codec,
+                Glyphs.MONITOR, 0xFFf59e0b, new int[]{R.string.st_resolution, R.string.st_codec,
                 R.string.st_encoder, R.string.st_bitrate, R.string.st_fps}));
         navs.add(new Nav(SEC_CLIPBOARD, R.string.st_nav_clipboard, R.string.st_nav_clipboard_sub,
-                "📋", 0xFF4ade80, new int[]{R.string.st_clip_sync, R.string.st_clip_current,
+                Glyphs.CLIPBOARD, 0xFF4ade80, new int[]{R.string.st_clip_sync, R.string.st_clip_current,
                 R.string.st_clip_history}));
         navs.add(new Nav(SEC_ABOUT, R.string.st_nav_about, R.string.st_nav_about_sub,
-                "ℹ", 0xFF94a3b8, new int[]{R.string.st_updates, R.string.st_maintenance,
+                Glyphs.INFO, 0xFF94a3b8, new int[]{R.string.st_updates, R.string.st_maintenance,
                 R.string.st_factory_reset, R.string.st_reset_home}));
     }
 
@@ -485,10 +485,10 @@ public class SettingsActivity extends Activity {
         head.addView(wordmark, new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView searchIcon = new TextView(this);
-        searchIcon.setText("🔍");
-        searchIcon.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(13));
-        searchIcon.setGravity(Gravity.CENTER);
+        ImageView searchIcon = new ImageView(this);
+        searchIcon.setImageDrawable(Glyphs.of(Glyphs.SEARCH, theme.textDim));
+        searchIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        searchIcon.setPadding(dp(7), dp(7), dp(7), dp(7));
         searchIcon.setContentDescription(s(R.string.st_search));
         searchIcon.setBackground(tapBackground(0x00000000, theme.hover, 9));
         searchIcon.setOnClickListener(v -> {
@@ -586,10 +586,11 @@ public class SettingsActivity extends Activity {
             applyNarrowVisibility();
         });
 
-        TextView icon = new TextView(this);
-        icon.setText(nav.glyph);
-        icon.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(15));
-        icon.setGravity(Gravity.CENTER);
+        // Drawn, not typed — see Glyphs. `nav.glyph` names one of them.
+        ImageView icon = new ImageView(this);
+        icon.setImageDrawable(Glyphs.of(nav.glyph, nav.tint));
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        icon.setPadding(dp(8), dp(8), dp(8), dp(8));
         icon.setBackground(roundedFill(blend(nav.tint, 0x33), 12));
         LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(34), dp(34));
         iconLp.rightMargin = dp(12);
@@ -2820,10 +2821,10 @@ public class SettingsActivity extends Activity {
         groupHeader(body, s(R.string.st_perf_what));
         LinearLayout whatCard = card(body);
         String[][] effects = {
-                {"◑", s(R.string.st_perf_effects), s(R.string.st_perf_effects_sub)},
-                {"⟳", s(R.string.st_perf_anim), s(R.string.st_perf_anim_sub)},
-                {"▤", s(R.string.st_perf_shadow), s(R.string.st_perf_shadow_sub)},
-                {"🎞", s(R.string.st_perf_stream), s(R.string.st_perf_stream_sub)},
+                {Glyphs.HALF, s(R.string.st_perf_effects), s(R.string.st_perf_effects_sub)},
+                {Glyphs.ROTATE, s(R.string.st_perf_anim), s(R.string.st_perf_anim_sub)},
+                {Glyphs.LAYERS, s(R.string.st_perf_shadow), s(R.string.st_perf_shadow_sub)},
+                {Glyphs.MONITOR, s(R.string.st_perf_stream), s(R.string.st_perf_stream_sub)},
         };
         for (String[] effect : effects) {
             effectRow(whatCard, effect[0], effect[1], effect[2], on);
@@ -2849,11 +2850,10 @@ public class SettingsActivity extends Activity {
         row.setPadding(dp(14), dp(10), dp(14), dp(10));
         row.setAlpha(active ? 1f : 0.4f);
 
-        TextView icon = new TextView(this);
-        icon.setText(glyph);
-        icon.setTextColor(active ? theme.accent : theme.textDim);
-        icon.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(13));
-        icon.setGravity(Gravity.CENTER);
+        ImageView icon = new ImageView(this);
+        icon.setImageDrawable(Glyphs.of(glyph, active ? theme.accent : theme.textDim));
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        icon.setPadding(dp(4), dp(4), dp(4), dp(4));
         LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(26), dp(26));
         iconLp.rightMargin = dp(10);
         row.addView(icon, iconLp);

@@ -159,11 +159,21 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- NOT resizeable, and that is the whole point.
+
+             A resizeable activity may be placed in a freeform task, and on a
+             desktop-mode display every freeform task wears the platform's own
+             caption — minimise, maximise, close, in One UI's colours, above the
+             desktop's wallpaper. Our caption service already refuses to dress
+             our home (see isDesktopActivity), which left the platform's strip as
+             the only one still on it: "home a ekhono caption bar ache". A
+             non-resizeable activity can only be fullscreen, and a fullscreen
+             task has no caption to draw. The desktop is fullscreen by design. -->
         <activity
             android:name=".LauncherActivity"
             android:exported="true"
             android:launchMode="singleTask"
-            android:resizeableActivity="true"
+            android:resizeableActivity="false"
             android:stateNotNeeded="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboard|keyboardHidden|navigation|uiMode">
             <!--

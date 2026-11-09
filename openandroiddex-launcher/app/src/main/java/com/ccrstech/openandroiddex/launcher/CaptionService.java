@@ -171,6 +171,21 @@ public final class CaptionService extends AccessibilityService {
             if (hidden) s.publishMinimised();
             return true;
         }
+        // Not in `tasks`: it is not visible, and every hidden window left the
+        // map the moment it was hidden. `minimised` is where it still is, and
+        // this is the click that the taskbar's tile makes — so without this
+        // half, a minimised app's tile answered with a from-scratch `am start`
+        // that cannot clear the hidden flag, and the window never came back.
+        for (java.util.Map.Entry<Integer, Min> e : s.minimised.entrySet()) {
+            Min m = e.getValue();
+            if (!pkg.equals(m.pkg)) continue;
+            final int id = e.getKey();
+            final int display = m.display;
+            s.minimised.remove(id);
+            s.wm.post(() -> s.wm.show(display, id));
+            s.publishMinimised();
+            return true;
+        }
         return false;
     }
 
@@ -178,9 +193,16 @@ public final class CaptionService extends AccessibilityService {
         CaptionService s = live;
         if (s == null) return java.util.Collections.emptySet();
         java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
-        // `tasks` is the display's live task list, refreshed by the reconcile pass.
+        // `tasks` is the display's live task list, refreshed by the reconcile pass…
         for (WmClient.Task t : s.tasks.values()) {
             if (t.pkg != null && !t.pkg.isEmpty()) out.add(t.pkg);
+        }
+        // …and it is built from VISIBLE tasks (see applyTasks), so a window we
+        // minimised is not in it. That is the whole reason an app could leave
+        // the taskbar the moment it was minimised: `minimised` is the only
+        // record of a hidden window, so it has to be asked as well as `tasks`.
+        for (Min m : s.minimised.values()) {
+            if (m.pkg != null && !m.pkg.isEmpty()) out.add(m.pkg);
         }
         return out;
     }
@@ -2735,7 +2757,7 @@ public final class CaptionService extends AccessibilityService {
     private void onMinimise(WmClient.Task task) {
         final int display = task.displayId;
         final int id = task.taskId;
-        minimised.put(id, new Min(task.pkg, task.activity, SystemClock.uptimeMillis()));
+        minimised.put(id, new Min(task.pkg, task.activity, display, SystemClock.uptimeMillis()));
         publishMinimised();
         wm.post(() -> wm.hide(display, id));
     }
@@ -2749,6 +2771,8 @@ public final class CaptionService extends AccessibilityService {
          * pkg-only match would un-hide whichever came first.
          */
         final String activity;
+        /** The display its task was on — `tasks` no longer holds it once hidden. */
+        final int display;
         /** uptime the minimise was issued at — the grace window starts here. */
         final long since;
         /** Set once the task has actually been observed hidden. */
@@ -2766,9 +2790,10 @@ public final class CaptionService extends AccessibilityService {
         /** Not part of a batch — restore before anything that is. */
         static final int LOOSE = -1;
 
-        Min(String pkg, String activity, long since) {
+        Min(String pkg, String activity, int display, long since) {
             this.pkg = pkg;
             this.activity = activity;
+            this.display = display;
             this.since = since;
         }
     }
@@ -2847,7 +2872,7 @@ public final class CaptionService extends AccessibilityService {
         for (int i = 0; i < ordered.size(); i++) {
             WmClient.Task t = ordered.get(i);
             if (!tasks.containsKey(t.taskId)) continue;
-            Min m = new Min(t.pkg, t.activity, SystemClock.uptimeMillis());
+            Min m = new Min(t.pkg, t.activity, t.displayId, SystemClock.uptimeMillis());
             m.depth = i;
             minimised.put(t.taskId, m);
             final int id = t.taskId;

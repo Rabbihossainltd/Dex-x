@@ -476,6 +476,10 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
      * is ON SCREEN rather than what could be.
      */
     private void syncNavCluster() {
+        // The platform's bars first, and unconditionally: this used to return
+        // early when there was no cluster of ours to sync, which is now always,
+        // and the immersive request never ran again for the whole session.
+        if (!onPhone()) hideSystemBars();
         if (navCluster == null) return;
         boolean platformBar = !onPhone() && bottomSystemInset() > dp(6);
         // A desktop has NO navigation bar — not the platform's, and not ours.
@@ -725,7 +729,9 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         RequestProvider.enqueue("taskbar", taskbarAutohide() ? "autohide.on" : "autohide.off");
     }
     /** The phone dock's Mouse button, so it can show the touchpad's state. */
-    private TextView padButton;
+    private LinearLayout padButton;
+    private ImageView padIcon;
+    private TextView padLabel;
     /** The phone's touchpad and pointer; null until asked for. See {@link DexPointer}. */
     /** How long a click may wait on the daemon before it is called a failure. */
     /** The geometry of the most recent shapeForDesktop, for the launch path that loses it. */
@@ -1839,6 +1845,22 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         maybeRebuildForDisplay();
     }
 
+    /**
+     * One of {@link Glyphs}' drawn icons at a dp size and a colour.
+     *
+     * <p>Everything the shell used to show as an emoji — the magnifier, the
+     * folder tile, the bell, the pointer in the dock, the app menu's three
+     * tiles — goes through here now. Reported three rounds running.
+     */
+    private ImageView glyphIcon(String name, float sizeDp, int colour) {
+        ImageView iv = new ImageView(this);
+        iv.setImageDrawable(Glyphs.of(name, colour));
+        iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        int px = Math.round(dp(sizeDp));
+        iv.setLayoutParams(new LinearLayout.LayoutParams(px, px));
+        return iv;
+    }
+
     /** dp → px from uiDensity, NOT Resources (see uiDensity docs). */
     int dp(float v) {
         return Math.round(v * uiDensity / 160f);
@@ -2693,10 +2715,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         row.setBackground(roundedFill(theme.field, 8));
         row.setPadding(dp(14), 0, dp(14), 0);
 
-        TextView magnifier = new TextView(this);
-        magnifier.setText("🔍");
-        magnifier.setTextColor(theme.textFaint);
-        magnifier.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(13));
+        View magnifier = glyphIcon(Glyphs.SEARCH, 16f, theme.textFaint);
         LinearLayout.LayoutParams magLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         magLp.rightMargin = dp(10);
@@ -2935,10 +2954,11 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         account.setOnClickListener(v -> launchSettings());
         DexCursors.apply(account, DexCursors.ROLE_HAND);
 
-        TextView avatar = new TextView(this);
-        avatar.setText("👤");
-        avatar.setGravity(Gravity.CENTER);
-        avatar.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(13));
+        // Drawn, not typed: 👤 is a coloured emoji in whatever font the phone
+        // ships, and it was landing in the middle of a flat grey menu.
+        ImageView avatar = glyphIcon(Glyphs.PERSON, 15f, theme.text);
+        avatar.setPadding(dp(7), dp(7), dp(7), dp(7));
+        avatar.setScaleType(ImageView.ScaleType.FIT_CENTER);
         // A circle, which is the one shape an account picture has in Windows.
         avatar.setBackground(theme.surface(theme.accentSoft, dp(14)));
         LinearLayout.LayoutParams avatarLp = new LinearLayout.LayoutParams(dp(28), dp(28));
@@ -3298,7 +3318,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         // half-right. Last in the list on purpose: the four above keep their
         // order, and their positions in the Windows 11 Start grid.
         if (!onPhone()) {
-            tiles.add(glyphTile("📁", getString(R.string.ft_label),
+            tiles.add(glyphTile(Glyphs.FOLDER, getString(R.string.ft_label),
                     v -> launchFileTransfer(), this::showFileTransferMenu));
         }
         return tiles;
@@ -3327,10 +3347,12 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
             return true;
         });
 
-        TextView icon = new TextView(this);
-        icon.setText(glyph);
-        icon.setTextSize(TypedValue.COMPLEX_UNIT_PX, dp(iconDp()) * 0.52f);
-        icon.setGravity(Gravity.CENTER);
+        // `glyph` now names one of Glyphs' drawn icons; the emoji it used to
+        // hold (📁) is gone.
+        ImageView icon = glyphIcon(glyph, iconDp() * 0.58f, theme.text);
+        icon.setPadding(dp(iconDp()) / 5, dp(iconDp()) / 5,
+                dp(iconDp()) / 5, dp(iconDp()) / 5);
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
         icon.setBackground(roundedFill(theme.accentSoft, 12));
         tile.removeViewAt(0);
         tile.addView(icon, 0, new LinearLayout.LayoutParams(dp(iconDp()), dp(iconDp())));
@@ -3686,13 +3708,15 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
      */
     private View buildTaskbar() {
         if (onPhone()) return buildPhoneDock();
-        View nav = theme.win11 ? buildWin11NavCluster() : buildNavCluster();
-        navCluster = nav;
-        // The desktop display may be showing Android's own navigation bar along
-        // its bottom edge — a display created without system decorations is not
-        // supposed to, but a phone whose desktop mode insists (and every phone
-        // on an early Android) will. Ours is the one that must give way: the
-        // platform's is a system bar and cannot be taken down by an app.
+        // No navigation cluster at all — reported three times, removed for good.
+        //
+        // ◁ ○ ▢ under the taskbar, or the single ◁ the Windows shell kept "just
+        // for Back", both read as the phone's navigation bar sitting on the
+        // desktop. The bar below carries Start, search, task view and the open
+        // apps; Back lives in the quick panel (and on the phone's own key), so
+        // the strip has nothing left to be.
+        navCluster = null;
+        // The platform's own bar is still asked to stay off the display.
         syncNavCluster();
         View apps = theme.win11 ? buildWin11Cluster() : buildAppsCluster();
         View tray = buildTrayCluster();
@@ -3703,9 +3727,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.setBaselineAligned(false);
-            row.addView(nav, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT));
+            row.setPadding(dp(8), 0, 0, 0);
             // the one elastic cluster — the open-apps strip inside it scrolls
             row.addView(apps, new LinearLayout.LayoutParams(
                     0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
@@ -3715,12 +3737,14 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
             bar = row;
         } else {
             FrameLayout frame = new FrameLayout(this);
-            frame.addView(nav, new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT,
-                    Gravity.START | Gravity.CENTER_VERTICAL));
+            // The open-apps strip starts at the LEFT edge now that nothing sits
+            // in front of it, and the tray keeps the right one. Both are
+            // fill-parent-with-gravity so the Windows shell's centred cluster
+            // still lands in the middle of the bar rather than the middle of a
+            // shrunken box.
             frame.addView(apps, new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT,
-                    Gravity.CENTER));
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
+                    Gravity.FILL));
             frame.addView(tray, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT,
                     Gravity.END | Gravity.CENTER_VERTICAL));
@@ -3771,11 +3795,13 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         dock.setBackground(theme.surface(theme.bar(), dp(DOCK_DP) / 2f));
         dock.setElevation(theme.perf ? 0f : dp(8));
 
-        dock.addView(dockButton("⊞", getString(R.string.lx_apps),
-                theme.text, v -> toggleDrawer(), null));
+        dock.addView(dockButton(glyphIcon(Glyphs.GRID, 18f, theme.text),
+                getString(R.string.lx_apps), v -> toggleDrawer(), null));
 
-        padButton = dockButton("🖱", getString(R.string.lx_pad),
-                theme.text, v -> togglePad(), v -> showPadOptions());
+        padButton = dockButton(glyphIcon(Glyphs.MOUSE, 18f, theme.text),
+                getString(R.string.lx_pad), v -> togglePad(), v -> showPadOptions());
+        padIcon = (ImageView) padButton.getChildAt(0);
+        padLabel = (TextView) padButton.getChildAt(1);
         dock.addView(padButton);
         updatePadButton();
 
@@ -3790,8 +3816,14 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     /** A dock button whose icon is a drawable rather than a glyph. */
     private TextView dockIconButton(int iconRes, String label, int tint,
                                     View.OnClickListener onClick) {
-        TextView btn = dockButton("", label, tint, onClick, null);
-        btn.setText(label);
+        TextView btn = new TextView(this);
+        btn.setContentDescription(label);
+        btn.setTextColor(tint);
+        btn.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(10.5f));
+        btn.setGravity(Gravity.CENTER);
+        btn.setPadding(dp(14), dp(6), dp(14), dp(6));
+        btn.setBackground(tapBackground(0x00000000, theme.hover, 16));
+        btn.setOnClickListener(onClick);
         Drawable icon = getDrawable(iconRes);
         if (icon != null) {
             icon = icon.mutate();
@@ -3812,18 +3844,26 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
      * touchscreen, so a tooltip has nowhere to appear and a bare glyph is the
      * whole of what the button ever says about itself.
      */
-    private TextView dockButton(String glyph, String label, int tint,
-                                View.OnClickListener onClick, View.OnClickListener onHold) {
-        TextView btn = new TextView(this);
-        btn.setText(dockLabel(glyph, label));
-        btn.setContentDescription(label);
-        btn.setTextColor(tint);
-        btn.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(10.5f));
-        btn.setLineSpacing(0f, 0.95f);
-        btn.setGravity(Gravity.CENTER);
+    private LinearLayout dockButton(View icon, String label,
+                                    View.OnClickListener onClick, View.OnClickListener onHold) {
+        LinearLayout btn = new LinearLayout(this);
+        btn.setOrientation(LinearLayout.VERTICAL);
+        btn.setGravity(Gravity.CENTER_HORIZONTAL);
         btn.setPadding(dp(14), dp(6), dp(14), dp(6));
         btn.setBackground(tapBackground(0x00000000, theme.hover, 16));
         btn.setOnClickListener(onClick);
+        // Icon over label, as two views rather than one span: the icon is a
+        // drawing now (Glyphs), and a span cannot hold one. The whole column
+        // carries the description, so the two are announced as one button.
+        btn.addView(icon, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        TextView text = new TextView(this);
+        text.setText(label);
+        text.setTextColor(theme.text);
+        text.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(10.5f));
+        text.setGravity(Gravity.CENTER);
+        btn.addView(text);
+        btn.setContentDescription(label);
         if (onHold != null) {
             btn.setOnLongClickListener(v -> {
                 onHold.onClick(v);
@@ -3831,18 +3871,6 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
             });
         }
         return btn;
-    }
-
-    /**
-     * Glyph over label, in one TextView. Two views would be tidier to read and
-     * would cost the button its single content description — a screen reader
-     * would announce the emoji, then the word.
-     */
-    private CharSequence dockLabel(String glyph, String label) {
-        SpannableString text = new SpannableString(glyph + "\n" + label);
-        text.setSpan(new RelativeSizeSpan(1.7f), 0, glyph.length(),
-                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        return text;
     }
 
     /** Taskbar's left cluster: back · home · open apps. */
@@ -3926,7 +3954,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         left.setGravity(Gravity.CENTER_VERTICAL);
         left.setPadding(dp(compact ? 4 : 8), 0, 0, 0);
         // executed by the PC (adb key inject) via the request queue
-        left.addView(win11BarButton(barGlyph("◁"), getString(R.string.lx_back),
+        left.addView(win11BarButton(barGlyph(Glyphs.BACK), getString(R.string.lx_back),
                 v -> RequestProvider.enqueue("key", "back")));
         return left;
     }
@@ -3950,11 +3978,11 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         start.setImageDrawable(Win11.logo(theme.accent));
         center.addView(win11BarButton(start, getString(R.string.w11_start),
                 v -> toggleDrawer()));
-        center.addView(win11BarButton(barGlyph("🔍"), getString(R.string.w11_search),
+        center.addView(win11BarButton(barGlyph(Glyphs.SEARCH), getString(R.string.w11_search),
                 v -> showStartSearching()));
-        center.addView(win11BarButton(barGlyph("▢"), getString(R.string.w11_task_view),
+        center.addView(win11BarButton(barGlyph(Glyphs.TASKS), getString(R.string.w11_task_view),
                 v -> toggleRecentsPopup()));
-        center.addView(win11BarButton(barGlyph("▭"), getString(R.string.w11_desktop),
+        center.addView(win11BarButton(barGlyph(Glyphs.MONITOR), getString(R.string.w11_desktop),
                 v -> goHome()));
 
         // The divider separates two clusters that compact has already pushed
@@ -3985,13 +4013,10 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     }
 
     /** A glyph sized for a Windows 11 taskbar button. */
-    private TextView barGlyph(String glyph) {
-        TextView glyphView = new TextView(this);
-        glyphView.setText(glyph);
-        glyphView.setTextColor(theme.textDim);
-        glyphView.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(compact ? 13 : 15));
-        glyphView.setGravity(Gravity.CENTER);
-        return glyphView;
+    private View barGlyph(String name) {
+        // Named icons from Glyphs instead of ▢ / ▭ / 🔍 characters, which were
+        // tofu boxes on some phones and emoji on others.
+        return glyphIcon(name, compact ? 17f : 19f, theme.textDim);
     }
 
     /**
@@ -4080,6 +4105,10 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         batteryPill.setBackground(tapBackground(theme.field, theme.hover, 10));
         batteryPill.setContentDescription(getString(R.string.lx_battery_info));
         batteryPill.setOnClickListener(v -> toggleBatteryPopup());
+        // The 🔋 / ⚡ that used to be inside the text is a drawn icon now; the
+        // pill's text is the percentage and nothing else, swapped for a bolt
+        // while charging (see updateBatteryPill).
+        batteryPill.setCompoundDrawablePadding(dp(4));
         LinearLayout.LayoutParams pillLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         pillLp.setMargins(0, 0, gap, 0);
@@ -4221,11 +4250,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         wrap.setContentDescription(getString(R.string.lx_notifications));
         wrap.setOnClickListener(v -> toggleNotificationsPopup());
 
-        TextView glyph = new TextView(this);
-        glyph.setText("🔔");
-        glyph.setTextColor(theme.textDim);
-        glyph.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(compact ? 12.5f : 14));
-        glyph.setGravity(Gravity.CENTER);
+        View glyph = glyphIcon(Glyphs.BELL, compact ? 17f : 19f, theme.textDim);
         wrap.addView(glyph, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -4699,15 +4724,17 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
 
     private void updateBatteryPill() {
         if (batteryPill == null) return;
+        int cell = Math.round(sp(compact ? 11 : 12));
+        boolean charging = lastBattery != null && isCharging();
+        Drawable icon = Glyphs.of(lastBattery == null ? Glyphs.DOT
+                : charging ? Glyphs.BOLT : Glyphs.BATTERY, theme.text);
+        icon.setBounds(0, 0, cell, cell);
+        batteryPill.setCompoundDrawablesRelative(icon, null, null, null);
         if (lastBattery == null) {
-            batteryPill.setText("🔋 —");
+            batteryPill.setText("—");
             return;
         }
-        // Narrow tray: the battery glyph is the first thing to go. The number
-        // is what the pill is for, and charging still shows as ⚡.
-        batteryPill.setText(compact
-                ? (isCharging() ? "⚡" : "") + batteryPercent() + "%"
-                : (isCharging() ? "⚡ " : "🔋 ") + batteryPercent() + "%");
+        batteryPill.setText(batteryPercent() + "%");
     }
 
     private void toggleBatteryPopup() {
@@ -4878,16 +4905,16 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         return panel;
     }
 
-    private void addInfoRow(LinearLayout panel, String emoji, String label, String value) {
+    private void addInfoRow(LinearLayout panel, String icon_, String label, String value) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(0, dp(5), 0, dp(5));
-        TextView icon = new TextView(this);
-        icon.setText(emoji);
-        icon.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(12));
-        icon.setPadding(0, 0, dp(10), 0);
-        row.addView(icon);
+        // Drawn (Glyphs), not the 🔌 🌡 ⚡ 🔁 💚 🔬 this row used to carry.
+        ImageView icon = glyphIcon(icon_, 15f, theme.textDim);
+        LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(15), dp(15));
+        iconLp.rightMargin = dp(10);
+        row.addView(icon, iconLp);
         TextView lab = new TextView(this);
         lab.setText(label);
         lab.setTextColor(theme.textDim);
@@ -4921,7 +4948,11 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         head.addView(pctView);
         if (lastBattery != null && isCharging()) {
             TextView chip = new TextView(this);
-            chip.setText("⚡ " + getString(R.string.lx_charging));
+            Drawable bolt = Glyphs.of(Glyphs.BOLT, theme.accent);
+            bolt.setBounds(0, 0, Math.round(sp(11)), Math.round(sp(11)));
+            chip.setCompoundDrawablesRelative(bolt, null, null, null);
+            chip.setCompoundDrawablePadding(dp(3));
+            chip.setText(getString(R.string.lx_charging));
             chip.setTextColor(theme.positive);
             chip.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(11));
             chip.setBackground(roundedFill(0x2E22C55E, 9));
@@ -4984,12 +5015,12 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         } catch (Exception ignored) {
         }
 
-        addInfoRow(panel, "🔌", getString(R.string.lx_plug_type), plug);
-        addInfoRow(panel, "🌡", getString(R.string.lx_temperature), temp);
-        addInfoRow(panel, "⚡", getString(R.string.lx_voltage), volt);
-        addInfoRow(panel, "🔁", getString(R.string.lx_current), current);
-        addInfoRow(panel, "💚", getString(R.string.lx_health), health);
-        addInfoRow(panel, "🔬", getString(R.string.lx_technology), tech);
+        addInfoRow(panel, Glyphs.PLUG, getString(R.string.lx_plug_type), plug);
+        addInfoRow(panel, Glyphs.TEMP, getString(R.string.lx_temperature), temp);
+        addInfoRow(panel, Glyphs.BOLT, getString(R.string.lx_voltage), volt);
+        addInfoRow(panel, Glyphs.LOOP, getString(R.string.lx_current), current);
+        addInfoRow(panel, Glyphs.HEART, getString(R.string.lx_health), health);
+        addInfoRow(panel, Glyphs.FLASK, getString(R.string.lx_technology), tech);
         return panel;
     }
 
@@ -5591,11 +5622,11 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         List<View> tiles = new ArrayList<>();
         tiles.add(qsTile(getString(R.string.lx_wifi),
                 sysIcon(new String[]{"ic_wifi_signal_4", "ic_qs_wifi_full_4",
-                        "stat_sys_wifi_signal_4"}, 0), "📶",
+                        "stat_sys_wifi_signal_4"}, 0), Glyphs.WIFI,
                 globalSettingOn("wifi_on"), true,
                 on -> RequestProvider.enqueue("qs", on ? "wifi.on" : "wifi.off")));
         tiles.add(qsTile(getString(R.string.lx_bluetooth),
-                sysIcon(new String[0], android.R.drawable.stat_sys_data_bluetooth), "ᛒ",
+                sysIcon(new String[0], android.R.drawable.stat_sys_data_bluetooth), Glyphs.BLUETOOTH,
                 globalSettingOn("bluetooth_on"), true,
                 on -> RequestProvider.enqueue("qs", on ? "bt.on" : "bt.off")));
         tiles.add(qsTile(getString(R.string.lx_mobile_data),
@@ -5605,11 +5636,11 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
                 on -> RequestProvider.enqueue("qs", on ? "data.on" : "data.off")));
         tiles.add(qsTile(getString(R.string.lx_airplane),
                 sysIcon(new String[]{"ic_qs_airplane", "ic_airplanemode_active",
-                        "stat_sys_airplane_mode"}, 0), "✈",
+                        "stat_sys_airplane_mode"}, 0), Glyphs.AIRPLANE,
                 globalSettingOn(android.provider.Settings.Global.AIRPLANE_MODE_ON), true,
                 on -> RequestProvider.enqueue("qs", on ? "airplane.on" : "airplane.off")));
         tiles.add(qsTile(getString(R.string.lx_mute),
-                sysIcon(new String[0], android.R.drawable.ic_lock_silent_mode), "🔇",
+                sysIcon(new String[0], android.R.drawable.ic_lock_silent_mode), Glyphs.MUTE,
                 muted, true,
                 on -> {
                     try {
@@ -5621,26 +5652,26 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
                     }
                 }));
         tiles.add(qsTile(getString(R.string.lx_rotate),
-                sysIcon(new String[0], android.R.drawable.ic_menu_rotate), "⟳",
+                sysIcon(new String[0], android.R.drawable.ic_menu_rotate), Glyphs.ROTATE,
                 android.provider.Settings.System.getInt(getContentResolver(),
                         android.provider.Settings.System.ACCELEROMETER_ROTATION, 0) != 0, true,
                 on -> RequestProvider.enqueue("qs", on ? "rotate.on" : "rotate.off")));
         tiles.add(qsTile(getString(R.string.lx_location),
-                sysIcon(new String[0], android.R.drawable.ic_menu_mylocation), "◎",
+                sysIcon(new String[0], android.R.drawable.ic_menu_mylocation), Glyphs.LOCATION,
                 locationOn(), true,
                 on -> RequestProvider.enqueue("qs", on ? "location.on" : "location.off")));
         tiles.add(qsTile(getString(R.string.lx_torch),
-                sysIcon(new String[]{"ic_qs_flashlight", "ic_signal_flashlight"}, 0), "🔦",
+                sysIcon(new String[]{"ic_qs_flashlight", "ic_signal_flashlight"}, 0), Glyphs.TORCH,
                 torchOn, true,
                 this::setTorch));
-        tiles.add(qsTile(getString(R.string.lx_phone_screen), null, "📱",
+        tiles.add(qsTile(getString(R.string.lx_phone_screen), null, Glyphs.PHONE,
                 phoneScreenOn, true,
                 this::setPhoneScreen));
         // Beside the tile that turns the phone's screen off, the other one here about
         // the phone in the user's hand: it turns that screen into this desktop's
         // touchpad. Not a toggle — it opens a screen over there.
         if (touchpadUsable()) {
-            tiles.add(qsTile(getString(R.string.lx_pad_title), null, "🖱",
+            tiles.add(qsTile(getString(R.string.lx_pad_title), null, Glyphs.MOUSE,
                     false, false,
                     on -> {
                         dismissPopups();
@@ -5648,7 +5679,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
                     }));
         }
         tiles.add(qsTile(getString(R.string.lx_lock),
-                sysIcon(new String[0], android.R.drawable.ic_lock_idle_lock), "🔒",
+                sysIcon(new String[0], android.R.drawable.ic_lock_idle_lock), Glyphs.LOCK,
                 false, false,
                 on -> {
                     RequestProvider.enqueue("qs", "lock.on");
@@ -5660,7 +5691,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         // something rather than turning something on.
         tiles.add(qsTile(getString(R.string.lx_screenshot),
                 sysIcon(new String[]{"ic_qs_screenshot", "ic_screenshot"},
-                        android.R.drawable.ic_menu_camera), "📷",
+                        android.R.drawable.ic_menu_camera), Glyphs.CAMERA,
                 false, false,
                 on -> takeDesktopShot()));
 
@@ -5865,8 +5896,14 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     private void updatePadButton() {
         if (padButton == null) return;
         boolean on = pointer != null && pointer.showing();
-        padButton.setText(dockLabel("🖱", getString(on ? R.string.lx_pad_on : R.string.lx_pad)));
-        padButton.setTextColor(on ? theme.accent : theme.text);
+        if (padLabel != null) {
+            padLabel.setText(getString(on ? R.string.lx_pad_on : R.string.lx_pad));
+            padLabel.setTextColor(on ? theme.accent : theme.text);
+        }
+        if (padIcon != null) {
+            padIcon.setImageDrawable(Glyphs.of(Glyphs.MOUSE,
+                    on ? theme.accent : theme.text));
+        }
         padButton.setBackground(tapBackground(on ? theme.accentSoft : 0x00000000, theme.hover, 16));
     }
 
@@ -6486,22 +6523,20 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
             final String glyph;
             if (SettingsActivity.class.getName().equals(activity)) {
                 label = getString(R.string.settings_label);
-                glyph = "⚙"; // gear
+                glyph = Glyphs.GEAR;
             } else if (TaskManagerActivity.class.getName().equals(activity)) {
                 label = getString(R.string.tm_title);
-                glyph = "📊";
+                glyph = Glyphs.CHART;
             } else if (FileTransferActivity.class.getName().equals(activity)) {
                 label = getString(R.string.ft_label);
-                glyph = "📁";
+                glyph = Glyphs.FOLDER;
             } else {
                 continue;
             }
 
-            TextView icon = new TextView(this);
-            icon.setText(glyph);
-            icon.setGravity(Gravity.CENTER);
-            icon.setTextSize(TypedValue.COMPLEX_UNIT_PX,
-                    theme.win11 ? sp(compact ? 15 : 18) : sp(compact ? 18 : 22));
+            View icon = glyphIcon(glyph,
+                    theme.win11 ? (compact ? 15f : 18f) : (compact ? 18f : 22f),
+                    theme.textDim);
             icon.setContentDescription(label);
             LinearLayout item = taskbarTile(icon);
 

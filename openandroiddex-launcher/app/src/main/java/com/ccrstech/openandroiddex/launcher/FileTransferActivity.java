@@ -31,6 +31,7 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.HorizontalScrollView;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -732,12 +733,12 @@ public class FileTransferActivity extends Activity {
         boxLp.rightMargin = dp(10);
         row.addView(box, boxLp);
 
-        TextView glyph = new TextView(this);
-        glyph.setText(e.dir ? "📁" : "📄");
-        glyph.setGravity(Gravity.CENTER);
-        glyph.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(12));
+        ImageView glyph = new ImageView(this);
+        glyph.setImageDrawable(Glyphs.of(e.dir ? Glyphs.FOLDER : Glyphs.FILE, theme.textDim));
+        glyph.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        glyph.setPadding(dp(3), dp(3), dp(3), dp(3));
         LinearLayout.LayoutParams glyphLp = new LinearLayout.LayoutParams(
-                dp(22), ViewGroup.LayoutParams.WRAP_CONTENT);
+                dp(22), dp(22));
         glyphLp.rightMargin = dp(6);
         row.addView(glyph, glyphLp);
 

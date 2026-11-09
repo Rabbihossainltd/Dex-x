@@ -395,10 +395,10 @@ public class TaskManagerActivity extends Activity {
             final String glyph;
             if (SettingsActivity.class.getName().equals(activity)) {
                 label = getString(R.string.settings_label);
-                glyph = "⚙";
+                glyph = Glyphs.GEAR;
             } else if (FileTransferActivity.class.getName().equals(activity)) {
                 label = getString(R.string.ft_label);
-                glyph = "📁";
+                glyph = Glyphs.FOLDER;
             } else {
                 continue;
             }
@@ -449,10 +449,10 @@ public class TaskManagerActivity extends Activity {
                         .putExtra("pkg", getPackageName())
                         .putExtra("activity", activity)));
 
-        TextView icon = new TextView(this);
-        icon.setText(glyph);
-        icon.setGravity(Gravity.CENTER);
-        icon.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(20));
+        ImageView icon = new ImageView(this);
+        icon.setImageDrawable(Glyphs.of(glyph, theme.textDim));
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        icon.setPadding(dp(5), dp(5), dp(5), dp(5));
         row.addView(icon, new LinearLayout.LayoutParams(dp(30), dp(30)));
 
         LinearLayout text = new LinearLayout(this);

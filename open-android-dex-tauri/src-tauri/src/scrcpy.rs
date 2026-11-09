@@ -210,7 +210,7 @@ pub struct SessionHandle {
     hwnd: Arc<std::sync::atomic::AtomicIsize>,
     /// Last lines scrcpy printed on this attempt.
     output: OutputLog,
-    /// Whether this session was spawned with `--audio-dup` — what
+    /// Whether this session carries the phone's playback capture at all — what
     /// `reconcile_audio_session` compares against the stored config to decide
     /// if the audio companion must be cycled. Meaningless for video sessions.
     audio_playback: bool,
@@ -267,7 +267,6 @@ fn build_args(opts: &MirrorOptions) -> Vec<String> {
         args.push("--no-control".into());
         if opts.audio_playback {
             args.push("--audio-source=playback".into());
-            args.push("--audio-dup".into());
         }
         return args;
     }
@@ -283,8 +282,15 @@ fn build_args(opts: &MirrorOptions) -> Vec<String> {
     if !opts.audio {
         args.push("--no-audio".into());
     } else if opts.audio_playback {
+        // Playback capture with NO `--audio-dup`: the sound MOVES to this
+        // computer and the phone goes quiet for the life of the session.
+        //
+        // `--audio-dup` is the opposite of the request. It means "keep playing
+        // it on the phone as well" — which is why three rounds of reports came
+        // back saying the phone still had the sound while the computer was
+        // playing it too. The Android floor for a move is 11; 13 is only
+        // needed for the duplicate we are not asking for.
         args.push("--audio-source=playback".into());
-        args.push("--audio-dup".into());
     }
     if opts.stay_awake {
         args.push("--stay-awake".into());
@@ -1730,16 +1736,21 @@ fn apply_stored_config(app: &AppHandle, opts: &mut MirrorOptions) {
     // Settings → Mouse & cursor → Pointer rendering. Like every other scrcpy
     // argument it only lands on a fresh session, which is why that card
     // carries the restart footer.
-    // …and the same for the pointer. The window asks for uhid (the only mode
-    // in which Android draws the cursor, so the only one where a link becomes
-    // a hand and a window edge becomes ↔). The stored key can still say "sdk"
-    // — someone who wants the computer's own arrow back — and only that
-    // explicit answer may overrule what was asked for. Unset used to mean sdk,
-    // which quietly undid the whole feature.
+    // The pointer: Android's own (uhid) only when the stored setting asks for
+    // it by name; everything else is scrcpy's sdk mode, where the computer
+    // owns the cursor.
+    //
+    // The two modes are a trade, and the code should not pretend otherwise.
+    // uhid is the only mode in which the DEVICE draws the pointer, so the only
+    // one where it changes shape over a link or a window edge — and it is also
+    // captured (it cannot leave the window), relative (it moves in device
+    // pixels, so it is faster than the desk by the stream's scale), and drawn
+    // in Android's style. sdk is the computer's cursor: free, 1:1, Windows'
+    // own. The desktop asked for sdk (App.tsx); an explicit "uhid" in the
+    // stored settings is the only thing that changes it.
     match map.get("mouse").map(String::as_str) {
-        Some("sdk") => opts.mouse_mode = None,
         Some("uhid") => opts.mouse_mode = Some("uhid".into()),
-        _ => {} // unset: keep what the caller asked for
+        _ => opts.mouse_mode = None, // "sdk", unset — the computer's pointer
     }
     // "Reduce quality" (Settings → Performance), the half that costs frames on
     // the WIRE rather than on the phone. Over Wi-Fi the encoder asking for more
@@ -1783,10 +1794,14 @@ fn stored_audio_forwarding(app: &AppHandle) -> (bool, bool) {
     // `stream_audio=off` in its preferences. Honouring that would leave the
     // computer silent for ever with no control anywhere to turn it back on —
     // which is exactly the "sound only on the mobile" this replaced. So the
-    // stored answer is not read: the desktop's sound always comes here, and
-    // `--audio-dup` means the phone never loses its own.
+    // stored answer is not read: the desktop's sound always comes here.
     let _ = app;
-    (true, true)
+    // (forward, duplicate) — and `false` for duplicate is the fix, not an
+    // oversight. "Duplicate" means the PHONE keeps the sound and this computer
+    // gets a copy, which is exactly the state three reports called "sound is
+    // still on the phone". The desktop TAKES the sound; the phone's own output
+    // comes back the moment the session ends.
+    (true, false)
 }
 
 /// "Where sound plays", as (forward, duplicate), for the app windows' sound menu.
@@ -1819,7 +1834,7 @@ pub fn set_audio_forwarding(app: &AppHandle, serial: &str, forward: bool, duplic
 /// own reconnect brings this companion back (see `monitor`), which avoids
 /// handing a process that can fail instantly (a refused audio source) an
 /// unsupervised respawn loop.
-fn audio_companion_options(serial: &str, dup: bool) -> MirrorOptions {
+fn audio_companion_options(serial: &str, _dup: bool) -> MirrorOptions {
     MirrorOptions {
         serial: serial.to_string(),
         max_size: 0,
@@ -1837,7 +1852,11 @@ fn audio_companion_options(serial: &str, dup: bool) -> MirrorOptions {
         new_display: None,
         vd_no_decorations: false,
         window_borderless: false,
-        audio_playback: dup,
+        // Always the playback capture — the companion exists to give this
+        // computer the phone's sound, and playback capture is the only path
+        // that MOVES it. `dup` no longer decides that: duplicating is the bug
+        // this round fixes, so there is nothing left for it to choose.
+        audio_playback: true,
         freeform: false,
         mouse_bind: None,
         mouse_mode: None,
@@ -1913,8 +1932,8 @@ fn reconcile_audio_session(app: &AppHandle, serial: &str) {
     if want {
         // Both of scrcpy's audio paths have an Android floor, and asking past
         // it is not a degraded session — it is the companion exiting on its
-        // command line. --audio-dup needs playback capture (13); any audio
-        // forwarding at all needs 11. A phone that did not answer is treated
+        // command line. Forwarding audio at all needs Android 11's playback
+        // capture. A phone that did not answer is treated
         // as able: it is usually still settling, and the worst case is a
         // companion that exits with its reason in the log.
         let sdk = device_sdk(app, serial);
@@ -4760,8 +4779,9 @@ pub fn start_mirror(app: AppHandle, mut options: MirrorOptions) -> Result<Sessio
     // session: scrcpy exits on its own command line, half a second in, with the
     // reason in a log nobody reads.
     //
-    // The desktop now carries its OWN sound (`--audio-source=playback
-    // --audio-dup` on the video session). It used to be a separate `--no-video`
+    // The desktop now carries its OWN sound (`--audio-source=playback` on the
+    // video session, no `--audio-dup`: the sound moves here, it does not play
+    // in both places). It used to be a separate `--no-video`
     // companion — a second process that could die a second after starting, and
     // whose only trace was a line in the log: "there is no sound on the
     // computer", with nothing to see anywhere. A session cannot silently miss
@@ -4775,17 +4795,6 @@ pub fn start_mirror(app: AppHandle, mut options: MirrorOptions) -> Result<Sessio
                     options.serial
                 );
                 options.audio = false;
-                options.audio_playback = false;
-            }
-            Some(sdk) if sdk < 33 => {
-                // `--audio-dup` is Android 13+. Without it playback capture
-                // DIVERTS: the computer gets the sound and the phone goes
-                // silent. Still the desktop's sound, not both — say which.
-                log::info!(
-                    "{}: Android {sdk} — sound moves to this computer (playing on both \
-                     needs 13)",
-                    options.serial
-                );
                 options.audio_playback = false;
             }
             _ => {}
@@ -4876,8 +4885,8 @@ pub fn start_mirror(app: AppHandle, mut options: MirrorOptions) -> Result<Sessio
         });
 
     // No companion for a desktop: its sound is on the very session above
-    // (`--audio-source=playback --audio-dup`). One owner, and it is the process
-    // the user is already watching.
+    // (`--audio-source=playback`, no duplicate). One owner, and it is the
+    // process the user is already watching.
 
     let info = SessionInfo {
         session_key: key,
@@ -5605,6 +5614,26 @@ mod tests {
         let args = build_args(&opts);
         assert!(args.iter().any(|a| a == "--window-width=804"));
         assert!(args.iter().any(|a| a == "--window-height=1542"));
+    }
+
+    /// The sound MOVES to the computer; it is never duplicated on to the phone.
+    ///
+    /// `--audio-dup` means "keep playing it on the phone as well", which is the
+    /// report this answered three rounds running ("dekstop e sound phone te e
+    /// baje"). Playback capture on its own diverts the output.
+    #[test]
+    fn the_desktop_session_moves_audio_and_does_not_duplicate_it() {
+        let mut opts = audio_companion_options("X", true);
+        opts.audio_only = false;
+        opts.audio = true;
+        opts.audio_playback = true;
+        let args = build_args(&opts);
+        assert!(args.iter().any(|a| a == "--audio-source=playback"));
+        assert!(!args.iter().any(|a| a == "--audio-dup"));
+        // …and the companion too, which has no window of its own.
+        let companion = build_args(&audio_companion_options("X", true));
+        assert!(companion.iter().any(|a| a == "--audio-source=playback"));
+        assert!(!companion.iter().any(|a| a == "--audio-dup"));
     }
 
     /// The companion runs with --no-control, and scrcpy refuses to start with

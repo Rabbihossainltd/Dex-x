@@ -128,6 +128,96 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.12 — the pointer, the bar and the sound, traced to the line
+
+Nine reports. Each one below is traced to the line that causes it, not to a guess; where a report
+could not be traced, it says so instead of shipping a "fix".
+
+### The pointer (three reports, one cause)
+
+| Report | What was actually wrong | Fix |
+| --- | --- | --- |
+| **The mouse is too sensitive** | Not a speed setting: in `uhid` the pointer is **relative** and moves in *device* pixels, so the same physical centimetre moved it further than the arrows drawn under it. `DEF_CURSOR_SPEED = 0` was already the middle of the range, and the only thing the speed slider writes is Android's `pointer_speed` over adb, which cannot slow a relative device down enough to make 1:1 true. | The default is `sdk` again (`App.tsx`, and `apply_stored_config` only takes `uhid` when the phone's settings say `uhid` by name). In `sdk` the pointer is absolute: one pixel of the desk is one pixel of the window, so there is no ratio to get wrong. |
+| **The cursor locks inside the Dex window** | That is what `uhid` *is*: the computer's pointer is captured by the device while it is over the stream — click to grab, Alt to release. Not a bug in our code, and not something a setting inside a captured pointer can fix. | Same change. `sdk` mode never captures: the pointer leaves the window like it leaves any other window. |
+| **The cursor art must be Windows' own** | It was ours. `DexCursors` renders seven styles of arrow — rounded, keylined, shadowed, some hollow — and one of them is the default, so every desktop session drew a pointer that was deliberately *not* the platform's and could never be Windows'. | `DexCursors.apply()` now returns before touching anything unless the phone asked for `uhid`. In `sdk` nothing of ours is applied and the arrow on screen is the computer's own — the one Windows draws. The styles still exist for the one mode where the phone owns the pointer. |
+
+`uhid` is not gone: Settings → Mouse & cursor → *Pointer rendering* still offers it, and it is still
+the only mode in which Android changes the pointer's shape over a link or a window edge. What changed
+is which of the two is the default, and that the art is not applied to a pointer the computer owns.
+
+### The navigation bar, again — third time
+
+`buildTaskbar()` still built it. The 0.7.11 change set `navCluster` to `GONE` **after** building
+`buildNavCluster()` (◁ ○ ▢) or `buildWin11NavCluster()` (◁), and 0.7.11's report was right that it
+still existed — a gone view that is still constructed is one layout pass, one accessibility node and
+one theme change away from being visible again.
+
+Now: no cluster is built at all. `buildTaskbar` no longer calls either builder, the two builders are
+unreferenced, and `syncNavCluster()` — which used to return early when there was no cluster to sync —
+hides the platform's bars first and unconditionally, because the early return had been skipping that
+for every session since the cluster went `GONE`.
+
+### The caption on the home — the platform's, not ours
+
+Ours was already fixed in 0.7.11 (`isDesktopActivity` compares simple class names, so the home is
+never dressed). What was left is the strip Android draws: `LauncherActivity` was declared
+`resizeableActivity="true"`, and a resizeable activity may be placed in a **freeform** task — and on a
+desktop-mode display every freeform task wears the platform's own caption, minimise/maximise/close
+included, above the desktop's wallpaper.
+
+It is `resizeableActivity="false"` now. A non-resizeable activity can only be fullscreen, and a
+fullscreen task has no caption to draw. The desktop is fullscreen by design; nothing about it wants a
+freeform home.
+
+### Emoji are gone from the shell
+
+Every one of them: the magnifier in Search, 👤 in the account row, 📁 in the drawer and in the taskbar's
+own-window tiles, 🔔 on the bell, 🖱 on the touchpad button, ⚙ 📊 📁 in the app menu, 🔋 ⚡ in the battery
+pill, and the twelve quick-settings fallbacks (📶 ✈ 🔇 🔦 📱 🔒 📷 and the rest).
+
+They are drawn now, from paths, by a new `Glyphs` class: 24-unit icons that scale to whatever density
+`wm density` last set, in the shell's own colours, at the shell's own weight. The reason is not taste —
+an emoji is whatever glyph the phone's font happens to carry: coloured where everything around it is
+not, a different optical size and weight from every other control in the bar, differently drawn on
+every OEM, and a tofu box on an old font.
+
+### Sound still on the phone — `--audio-dup` means "keep playing it there too"
+
+0.7.11 fixed the override that had been forcing `--no-audio`; the sound then really was forwarded. It
+was forwarded **with `--audio-dup`**, and that flag is not "play it here as well", it is *"keep playing
+it on the phone as well"*. So the computer played it, the phone played it, and the report was exactly
+right.
+
+`--audio-dup` is not passed any more — not by the desktop session, not by the audio companion. Playback
+capture on its own **moves** the output: the phone is silent for the life of the session, and gets its
+own output back the moment the session ends. (Android's floor for a move is 11; 13 was only needed for
+the duplicate we are not asking for, so the `< 33` branch that used to disable audio is gone too.)
+
+### A minimised app stays in the taskbar — and comes back when clicked
+
+`CaptionService.openPkgs()` walks `tasks`, and `tasks` is built in `applyTasks()` from
+`t.isFreeform() && t.visible` — so the moment a window was minimised it left the only list that could
+name it. The `minimised` map was the sole record, and only the broadcast carried that; the taskbar's
+per-tile click went through `focusPackage()`, which also walks `tasks`, found nothing, and fell through
+to a fresh `am start` — which cannot clear the hidden flag, so the window never came back.
+
+Two changes: `openPkgs()` unions the minimised set, and `focusPackage()` — when no *visible* task
+matches — looks the package up in `minimised` and un-hides that task (`wm.show`). `Min` now carries its
+display id, because there is no task record left to ask.
+
+### Not fixed, and said so
+
+* **The resize grip works where it is drawn — the window's edge does not.** Measured in code, and this
+  is the honest answer: our chrome owns the caption strip and *nothing else*; the window's other three
+  edges and its corner belong to the app's own surface. A hand that starts on the drawn `⤡` resizes
+  (that is a real gesture on the strip), and a hand that starts on the window's bottom-right corner
+  reaches the app, not us. Owning that corner needs the app's bounds inset on all four sides — a
+  frame, not a strip — which is a daemon verb and a chrome rewrite, not a bug fix. One real bug *was*
+  found and fixed here: `CaptionFallback`'s right-hand band started **two** bar-heights below the top
+  instead of one, so the 40 dp directly under the title bar resized nothing.
+* **Ctrl+V paste** and **the minimise animation** are unchanged from 0.7.11 — still open.
+* **Code signing** is unchanged: still no certificate, still "Unknown publisher" at UAC.
+
 ## v0.7.11 — the two overrides that undid the last two releases
 
 Checked again as asked, and the check found why 0.7.9 and 0.7.10 could both look unchanged:

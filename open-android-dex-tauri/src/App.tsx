@@ -84,17 +84,22 @@ function desktopOptions(d: DeviceInfo): MirrorOptions {
     freeform: true,
     // forward right-click to Android for context menus; Back = Shift+right-click
     mouseBind: "+hsn:bhsn",
-    // Android draws the pointer: hand over a link, ↔ on a freeform edge,
-    // I-beam in a field — the shapes the platform picks for whatever is under
-    // it, which is the whole point. In `sdk` mode the computer keeps its own
-    // arrow and no shape ever changes.
+    // THE COMPUTER's pointer, in `sdk` mode — Windows' own cursor, free to leave
+    // the window, moving one pixel for one pixel on the desktop.
     //
-    // UHID means the pointer is captured while it is over the desktop (click
-    // to grab, Alt to hand it back), the way a remote-desktop window behaves.
-    // A phone that refuses /dev/uhid never gets a desktop at all — that is a
-    // scrcpy exit before its first display, which `fallback_options` already
-    // retries once without it.
-    mouseMode: "uhid",
+    // This was `uhid` for two releases, because that is the only mode in which
+    // ANDROID draws the pointer (hand over a link, ↔ on an edge). Three reports
+    // came back from it, and all three are the same property seen from different
+    // sides: the pointer is CAPTURED while it is over the window (so it cannot
+    // leave), it moves in *device* pixels rather than window pixels (so it is
+    // faster than the desk it mirrors, by the ratio the stream is scaled by),
+    // and the shape it draws is Android's, not Windows'.
+    //
+    // scrcpy cannot have both: a device-drawn pointer needs a relative device,
+    // and a relative device has to be captured. Settings → Mouse & cursor →
+    // "Pointer rendering" switches to `uhid` for anyone who wants the shapes and
+    // accepts the capture; the default is the one that behaves like Windows.
+    mouseMode: "sdk",
   };
 }
 

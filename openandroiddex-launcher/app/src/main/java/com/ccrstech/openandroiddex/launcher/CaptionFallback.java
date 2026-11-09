@@ -466,7 +466,11 @@ final class CaptionFallback {
                     lp.width = size;
                     lp.height = h;
                     lp.x = b.right - size;
-                    lp.y = b.top + px * 2;
+                    // Below the bar — ONE bar-height, not two. The `px * 2`
+                    // here left a 40 dp strip directly under the title bar
+                    // that resized nothing, so a pull that started where the
+                    // caption ends did nothing at all.
+                    lp.y = b.top + px;
                     break;
                 case BOTTOM:
                     lp.width = w;

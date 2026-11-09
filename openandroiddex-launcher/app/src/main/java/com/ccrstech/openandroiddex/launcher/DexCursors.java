@@ -359,9 +359,35 @@ final class DexCursors {
     // ── applying ──
 
     /** Give one view its own pointer. Children without one inherit it. */
+    /**
+     * Is the COMPUTER drawing the pointer over this window, rather than the phone?
+     *
+     * <p>The desktop now runs scrcpy's {@code sdk} mouse mode, where the mouse is
+     * an absolute pointer the host owns: Windows draws the arrow, it moves one
+     * for one, and it leaves the window when it reaches the edge. In that mode a
+     * {@code PointerIcon} set here is either invisible (nothing is hovering the
+     * way a device pointer would) or — worse — a second, differently drawn arrow
+     * over the top of the real one.
+     *
+     * <p>It is also the answer to "cursor ta Windows er moto hobe": every style
+     * in {@link #STYLES} is OUR drawing — rounded, keylined, shadowed — and no
+     * arrangement of it is Windows' pointer. The only way to get Windows' pointer
+     * is to not draw one, which is what this does whenever the host draws it.
+     *
+     * <p>{@code uhid} is the exception and the reason these styles still exist:
+     * there the phone owns a captured pointer, and the art is what it shows.
+     */
+    private static boolean hostDrawsPointer(Context ctx) {
+        if (ctx == null) return true;
+        String mode = DexPrefs.getString(ctx, DexPrefs.KEY_MOUSE_MODE,
+                DexPrefs.DEF_MOUSE_MODE);
+        return !"uhid".equals(mode);
+    }
+
     static void apply(View view, int role) {
         if (view == null) return;
         try {
+            if (hostDrawsPointer(view.getContext())) return;
             view.setPointerIcon(icon(view.getContext(), role));
         } catch (Exception ignored) {
             // never worth failing a layout over
