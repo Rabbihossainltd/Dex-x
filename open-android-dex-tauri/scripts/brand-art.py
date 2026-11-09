@@ -181,9 +181,19 @@ def main():
     out = os.path.join(REPO, "openandroiddex-launcher", "app", "src", "main",
                        "res", "drawable-nodpi")
     os.makedirs(out, exist_ok=True)
-    tile(x, 432, SAFE_ZONE * 0.98).save(os.path.join(out, "ic_launcher_foreground.png"))
-    flat(x, 432, SAFE_ZONE * 0.98).save(os.path.join(out, "ic_launcher_monochrome.png"))
+    # The mark is drawn hard-edged, so a 256-colour palette is lossless here and
+    # costs a third of the bytes of a full RGBA layer — the APK is downloaded
+    # once per phone, so this is worth the four lines.
+    _png(tile(x, 432, SAFE_ZONE * 0.98), os.path.join(out, "ic_launcher_foreground.png"))
+    _png(flat(x, 432, SAFE_ZONE * 0.98), os.path.join(out, "ic_launcher_monochrome.png"))
     print("wrote launcher ic_launcher_foreground.png / _monochrome.png (432 px)")
+
+
+def _png(img, path):
+    """Save an RGBA layer as a palettised PNG, keeping its transparency."""
+    a = img.convert("RGBA")
+    q = a.quantize(colors=256, method=Image.FASTOCTREE)
+    q.save(path, "PNG", optimize=True)
 
 
 def _panel(art, w, h, scale, bg):

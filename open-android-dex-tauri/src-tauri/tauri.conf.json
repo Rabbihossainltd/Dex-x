@@ -60,7 +60,8 @@
         "installerIcon": "./windows/installer.ico",
         "headerImage": "./windows/header.bmp",
         "sidebarImage": "./windows/sidebar.bmp",
-        "uninstallerIcon": "./windows/installer.ico"
+        "uninstallerIcon": "./windows/installer.ico",
+        "template": "./windows/installer.nsi"
       }
     }
   },
