@@ -231,70 +231,17 @@ jobs:
           }
           Get-ChildItem dist | Select-Object Name, Length | Format-Table -AutoSize
 
-      # ── sign everything Windows reads a publisher from ────────────────────
+      # ── signing: NOT here ─────────────────────────────────────────────────
       #
-      # UAC's "Publisher" line comes from the Authenticode signature, and an
-      # unsigned exe has none — which is the "Unknown publisher" that was
-      # reported. The certificate here is SELF-SIGNED with the subject
-      # CN=Rabbihossainltd, so the name in every signature is ours; what a
-      # self-signed certificate cannot buy is the chain Windows trusts, so
-      # SmartScreen may still warn until a CA-issued code-signing certificate
-      # replaces it (drop the .pfx in as a secret and only this step changes).
-      #
-      # Signed here, after bundling, so the setup.exe itself carries it — that
-      # is the file UAC inspects when the wizard is started.
-      - name: Sign the exe, the portable binary and the installer
-        shell: pwsh
-        # Never fatal: a signature is an improvement to what Windows shows, not a
-        # reason to ship nothing. The step prints the status either way.
-        continue-on-error: true
-        timeout-minutes: 5
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $cert = New-SelfSignedCertificate `
-            -Type CodeSigningCert `
-            -Subject "CN=Rabbihossainltd, O=Rabbihossainltd, L=Dhaka, C=BD" `
-            -FriendlyName "Dex-X (Rabbihossainltd)" `
-            -CertStoreLocation Cert:\CurrentUser\My `
-            -KeyUsage DigitalSignature `
-            -KeyExportPolicy Exportable `
-            -NotAfter (Get-Date).AddYears(10)
-          # Trusted on the RUNNER only, so the signature can be verified here;
-          # this does nothing for the user's machine.
-          $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("Root", "CurrentUser")
-          $store.Open("ReadWrite"); $store.Add($cert); $store.Close()
-
-          # The installer (what UAC inspects when the wizard starts) and the
-          # portable binary (what a user double-clicks out of the zip).
-          $targets = @("dist/Dex-X-windows-x64-setup.exe", "portable/Dex-X.exe")
-          foreach ($f in $targets) {
-            if (-not (Test-Path $f)) { continue }
-            # No timestamp server: Set-AuthenticodeSignature blocks for ever when
-            # the RFC 3161 endpoint is unreachable from the runner, and a signature
-            # without a timestamp is still a signature — it just expires with the
-            # certificate instead of outliving it.
-            $sig = Set-AuthenticodeSignature -FilePath $f -Certificate $cert -HashAlgorithm SHA256
-            if ($sig.Status -ne "Valid") {
-              Write-Host "::warning::signature on $f is $($sig.Status): $($sig.StatusMessage)"
-            } else {
-              Write-Host "signed $f -> $($sig.SignerCertificate.Subject)"
-            }
-          }
-
-          # The portable zip was built before signing, so rebuild it with the
-          # signed binary inside: a zip whose exe is the unsigned copy would let
-          # the user run the one file Windows calls unknown.
-          if (Test-Path "portable/Dex-X.exe") {
-            $sig = Get-AuthenticodeSignature "portable/Dex-X.exe"
-            Write-Host "portable exe signature: $($sig.Status)"
-            Remove-Item "dist/Dex-X-windows-x64-portable.zip" -Force
-            Compress-Archive -Path portable/* -DestinationPath "dist/Dex-X-windows-x64-portable.zip"
-          }
-
-          foreach ($f in Get-ChildItem "dist/*.exe") {
-            $s = Get-AuthenticodeSignature $f.FullName
-            Write-Host "$($f.Name): $($s.Status) — $($s.SignerCertificate.Subject)"
-          }
+      # Tried and removed. Set-AuthenticodeSignature on the runner hangs until
+      # the job's timeout — twice, with and without a timestamp server — so a
+      # signing step costs five minutes and leaves dist/ unsigned, which is
+      # worse than no step at all. What Windows shows as the publisher is
+      # already set from tauri.conf.json (the uninstall key's Publisher, the
+      # app's CompanyName, the setup's CompanyName, and the wizard's own
+      # "Published by" line); the UAC prompt's "Verified publisher" needs a
+      # CA-issued code-signing certificate, which is a purchase, not a flag.
+      # When one exists, it goes here as a secret and this comment becomes code.
 
       - uses: actions/upload-artifact@v4
         with:
