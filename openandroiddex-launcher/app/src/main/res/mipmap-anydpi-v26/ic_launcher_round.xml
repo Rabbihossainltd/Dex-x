@@ -1,7 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- minSdk is 26, so the adaptive icon is the ONLY icon: there is no device
-     this app runs on that would need a legacy PNG fallback. The layers are the
-     mark the project's own brand art draws: a white tile, the Dex-X wordmark. -->
+     this app runs on that would need a legacy PNG fallback.
+
+     The foreground is the brand mark from scripts/brand-art.py, not a drawing of
+     its own. It used to be ic_launcher_foreground.xml, a vector of a laptop with
+     a phone in front of it — the mark this project was forked from, kept
+     untouched by the rebrand, so the phone's home screen still showed the OLD
+     logo. Anything that has to be "the logo" now comes from the same two source
+     images as the exe's icon, and the vectors are gone. -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@drawable/ic_launcher_background" />
     <foreground android:drawable="@drawable/ic_launcher_foreground" />
