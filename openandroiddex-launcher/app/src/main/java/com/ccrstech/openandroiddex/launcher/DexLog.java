@@ -53,6 +53,17 @@ final class DexLog {
         }
     }
 
+    /**
+     * A whole block into the kept log — the diagnostics report, so the file on
+     * the phone has it even if nobody copied it out of the dialog.
+     */
+    static void dump(String tag, String block) {
+        if (block == null) return;
+        for (String line : block.split("\n")) {
+            step(tag, line);
+        }
+    }
+
     /** The kept lines, oldest first. */
     static synchronized java.util.List<String> recent() {
         return new java.util.ArrayList<>(recent);

@@ -128,6 +128,27 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.7 — the installer that could not overwrite a running adb
+
+The 0.7.6 diagnostics came back, and with it three screenshots of the installer failing.
+Read together they name the bug that made the last four releases look like ten:
+
+| # | Reported | The cause | Fix |
+| --- | --- | --- | --- |
+| — | "Error opening file for writing: …\resources\bin\adb.exe" (and `AdbWinApi.dll`, `AdbWinUsbApi.dll`) | Those three files are exactly what a **running adb** holds open. The Dex-X window keeps an adb server alive for as long as it is open, so the installer could not replace them, and it stopped half way. A half-installed folder is worse than an old one: the exe is new, adb and its two DLLs are old, and every symptom after that (no window daemon, no desktop, no taskbar row, no resize) looks like a different bug. | NSIS hooks (`src-tauri/windows/nsis-hooks.nsh`) shut the session down before a single file is touched — `Dex-X.exe`, `open-android-dex-tauri.exe`, `adb.exe`, `scrcpy.exe` — on install **and** on uninstall, then wait 800 ms for the handles to close. After the files land, `ie4uinit.exe -show` tells Explorer the icon changed, which is the "shortcut still shows the old logo" report. |
+| 7 | "desktop shortcut করলে পুরোনো লোগো আসে" | Two causes, both real: Explorer caches shell icons per path, and the bundled exe was still named after the upstream project. | `mainBinaryName: "Dex-X"` — the installed program is now **Dex-X.exe**, so the shortcut, the taskbar button and the icon cache key are all new. Plus the `ie4uinit` above. |
+| — | the diagnostics said "PING: NO ANSWER" and then, on its last line, `NetworkOnMainThreadException` | **The diagnostic was lying about the thing it exists to measure.** The report gathered socket I/O on the UI thread; Android throws for that, and the catch turned the exception into the answer. A daemon that was answering perfectly could be reported dead. | The gather runs on a worker thread; the dialog only renders. The exception can no longer become a verdict. |
+| 8 | "phone er keyboard open hoi na connected thakle" | A phone driven from a computer has a **hardware keyboard** attached as far as Android is concerned, and Android's default is to keep the on-screen keyboard hidden while one is — so with Dex-X connected, tapping a field ON THE PHONE opens nothing. | `show_ime_with_hard_keyboard=1` joins the snapshot/restore set (`DESKTOP_SECURE`), so it is set for the session and put back on exit like `policy_control`. |
+| — | the report had to be interpreted | — | A **VERDICT:** line first, in words: no daemon (the computer is not running a session) / daemon but no display (a session started and died) / display but no accessibility (no title bars, no resize) / all three up. And the whole report is appended to the on-disk log, so `adb pull Android/data/<pkg>/files/dex-x.log` gets it without copy-paste. |
+
+### What the 0.7.6 report already proved
+
+* `service enabled in settings: NO`, `service running: NO` — accessibility was not on, so **no title bar
+  could have been drawn by any version**. That is a state only the phone can report, and now it does.
+* `display 0: 1080x2400` — **the only display was the phone's own**. There was no desktop display at
+  all, so there was no desktop to put a taskbar row on, nothing to resize and nothing to caption.
+  Everything on the list follows from that one line.
+
 ## v0.7.6 — a build that makes the phone answer
 
 Four releases in a row were guessed at from screenshots, and four in a row missed, because

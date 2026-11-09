@@ -40,8 +40,11 @@ final class Diagnostics {
     static String report(Context ctx) {
         StringBuilder b = new StringBuilder(4096);
         b.append("Dex-X launcher diagnostics\n");
-
         b.append("version: ").append(version(ctx)).append('\n');
+        // The verdict first, because a pasted report is read bottom-up by
+        // nobody: the three states are wildly different problems and the
+        // numbers below take a minute to interpret.
+        b.append("VERDICT: ").append(verdict(ctx)).append('\n');
         b.append("\n-- accessibility --\n");
         b.append("service running: ").append(CaptionService.isLive() ? "yes" : "NO").append('\n');
         b.append("service enabled in settings: ").append(accessibilityEnabled(ctx) ? "yes" : "NO")
@@ -108,6 +111,53 @@ final class Diagnostics {
         } catch (Throwable ignored) {
         }
         return b.toString();
+    }
+
+    /**
+     * One line, in words, for the state this phone is in.
+     *
+     * The three failures have nothing in common but their symptom, and the
+     * difference is what the reader needs first: no daemon means the computer
+     * never started a session; a daemon with no display means the session
+     * started and died; a display with no captions means only the caption is
+     * missing.
+     */
+    static String verdict(Context ctx) {
+        boolean service = CaptionService.isLive();
+        WmClient wm = new WmClient();
+        boolean daemon;
+        int desk;
+        try {
+            daemon = wm.isUp();
+            desk = daemon ? wm.desktopDisplay() : -1;
+        } catch (Throwable t) {
+            daemon = false;
+            desk = -1;
+        } finally {
+            try {
+                wm.shutdown();
+            } catch (Throwable ignored) {
+            }
+        }
+        boolean enabled = accessibilityEnabled(ctx);
+        if (!daemon && desk < 0) {
+            return "no window daemon — the computer is not running a desktop session for this phone "
+                    + "(nothing on the desktop can work until it is)";
+        }
+        if (daemon && desk < 0) {
+            return "the window daemon answers but reports no desktop display — a session was "
+                    + "started and the display is gone";
+        }
+        if (!service && !enabled) {
+            return "a desktop exists, but this phone has NOT enabled Dex-X's accessibility "
+                    + "service — no title bars, no minimise/close, no resize";
+        }
+        if (!service) {
+            return "the accessibility service is enabled in Settings but is NOT running — the "
+                    + "phone refused to bind it (reinstall, then Allow restricted settings)";
+        }
+        return "all three are up: the daemon answers, the display exists and the caption service "
+                + "is running";
     }
 
     private static void appendTasks(StringBuilder b, String label, List<WmClient.Task> tasks) {

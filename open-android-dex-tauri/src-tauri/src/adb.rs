@@ -826,7 +826,18 @@ const TOUCH_GLOBAL: &str = "block_untrusted_touches";
 ///
 /// `immersive_mode_confirmations` is set so the platform does not put its
 /// "swipe up to exit full screen" bubble over the desktop on every session.
-const DESKTOP_SECURE: [&str; 2] = ["policy_control", "immersive_mode_confirmations"];
+const DESKTOP_SECURE: [&str; 3] = [
+    "policy_control",
+    "immersive_mode_confirmations",
+    // The phone's own keyboard. A phone that is being driven from a computer
+    // has a HARDWARE keyboard attached as far as Android is concerned, and
+    // Android's default is to keep the on-screen keyboard hidden while one is
+    // — so with Dex-X connected, tapping a text field on the PHONE opens
+    // nothing at all ("phone er keyboard open hoi na connected thakle"). This
+    // flag is the documented way to say "show it anyway"; it is put back on
+    // exit like every other key here.
+    "show_ime_with_hard_keyboard",
+];
 
 /// Snapshot the secure keys above, under a `secure.`-prefixed name so the
 /// existing undo map can hold both namespaces without a second file.
@@ -1156,7 +1167,8 @@ pub fn adb_prepare_desktop(
             &serial,
             "shell",
             "settings put secure immersive_mode_confirmations confirmed; \
-             settings put secure policy_control immersive.full=*",
+             settings put secure policy_control immersive.full=*; \
+             settings put secure show_ime_with_hard_keyboard 1",
         ],
     ) {
         log::warn!("could not take the navigation bar off the desktop: {e}");

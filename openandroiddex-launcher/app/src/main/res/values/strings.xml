@@ -549,6 +549,7 @@
     <string name="lx_hc_pill_service">No title bars</string>
     <string name="lx_hc_pill_nostrip">Plain title bars</string>
     <string name="cx_diag">Diagnostics</string>
+    <string name="cx_diag_reading">Reading the phone state…</string>
     <string name="cx_diag_title">Dex-X diagnostics</string>
     <string name="cx_diag_copy">Copy</string>
     <string name="cx_diag_copied">Copied — paste it in the chat</string>

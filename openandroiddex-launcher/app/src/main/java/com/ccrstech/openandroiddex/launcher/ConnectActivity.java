@@ -360,7 +360,23 @@ public class ConnectActivity extends android.app.Activity {
      * the only one who can see them. One button, selectable text, and a copy.
      */
     private void showDiagnostics() {
-        String text = Diagnostics.report(this);
+        // OFF the main thread. Half of this report is socket I/O to the window
+        // daemon, and Android throws NetworkOnMainThreadException for exactly
+        // that — the first build of this screen reported "PING: NO ANSWER" for
+        // a daemon that was answering, because the exception BECAME the answer.
+        // A diagnostic that invents failures is worse than none.
+        Toast.makeText(this, getString(R.string.cx_diag_reading), Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            String text = Diagnostics.report(getApplicationContext());
+            // Into the on-disk log as well: the same text survives the dialog,
+            // so `adb pull .../files/dex-x.log` works when copying is awkward.
+            DexLog.dump("diag", text);
+            runOnUiThread(() -> showDiagnosticsReport(text));
+        }, "diagnostics").start();
+    }
+
+    private void showDiagnosticsReport(String text) {
+        if (isFinishing()) return;
         TextView body = new TextView(this);
         body.setText(text);
         body.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(11));
