@@ -373,9 +373,9 @@
     <string name="st_restart_now">Restart desktop now</string>
     <string name="st_restart_toast">Restarting the desktop…</string>
 
-    <string name="st_clip_sync">Sync across devices</string>
-    <string name="st_clip_sync_sub">Copy on the phone, paste on this computer and back</string>
-    <string name="st_clip_sync_note">Sync is part of the video session, so turning it on or off needs a desktop restart (Scrcpy Config).</string>
+    <string name="st_clip_sync">Share with the computer</string>
+    <string name="st_clip_sync_sub">Off by default: the phone and the computer keep their own clipboards</string>
+    <string name="st_clip_sync_note">On, a copy on either side replaces what the other had — one clipboard for both. Off, each keeps its own, and the taskbar clipboard list still remembers what the phone copied. Sharing is part of the video session, so changing it needs a desktop restart.</string>
     <string name="st_clip_current">Clipboard</string>
     <string name="st_clip_empty">The clipboard is empty</string>
     <string name="st_clip_placeholder">Type or paste text to put on the clipboard…</string>
@@ -1077,4 +1077,9 @@ If you switch this off again later, Android force-closes Linux and the desktop r
     <string name="upd_body">You have %1$s. The newer build is on the release page, with the Windows app beside it. Nothing is installed for you — the download is a file like the one you sideloaded.</string>
     <string name="upd_download">Open the release</string>
     <string name="upd_later">Not now</string>
+    <!-- The taskbar's clipboard flyout (Win+V, the phone's own list). -->
+    <string name="lx_clipboard">Clipboard</string>
+    <string name="lx_clipboard_empty">Nothing copied on the phone yet. What you copy here is kept here.</string>
+    <string name="lx_clipboard_copied">Copied</string>
+    <string name="lx_clipboard_clear">Clear history</string>
 </resources>

@@ -275,6 +275,14 @@ final class DexPrefs {
 
     /** JSON array, most recent first — see {@link DexClipboard}. Not a setting. */
     static final String KEY_CLIP_HISTORY = "clipboard_history";
+    /**
+     * Whether the taskbar shows the clipboard flyout (the tray's clipboard
+     * button). On by default: the list is the phone's own, it never leaves the
+     * device, and it is the reason the flyout can exist at all when sharing is
+     * off.
+     */
+    static final String KEY_CLIP_HISTORY_ON = "clipboard_list";
+    static final boolean DEF_CLIP_HISTORY_ON = true;
 
     // ── The phone's own touchpad — see {@link DexPointer} ──
     // Not in the Settings window: these belong to a surface that only exists
@@ -409,7 +417,12 @@ final class DexPrefs {
     static final boolean DEF_AUDIO_DUP = true;
     static final String DEF_CODEC = "auto";
     static final String DEF_ENCODER = "auto";
-    static final boolean DEF_CLIP_SYNC = true;
+    /**
+     * Off by default: the computer's clipboard and the phone's are two
+     * clipboards, and copying on one must not quietly replace what the other
+     * was about to paste. Sharing is one switch away in Settings → Clipboard.
+     */
+    static final boolean DEF_CLIP_SYNC = false;
 
     // ── The media flyout's phone-output pick ──
     // Which of the phone's own outputs the user pinned media to (via the

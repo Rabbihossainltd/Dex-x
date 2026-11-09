@@ -110,6 +110,24 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.2 — the computer and the phone keep their own clipboards
+
+| # | Asked for | What it took |
+| --- | --- | --- |
+| 10 | "PC ar mobile er kaj alada thakbe, shompurno" — the exe as a device of its own, not a second screen of the phone | The one place the two still shared state was the **clipboard**, and it shared it by default: copying on either side silently replaced what the other was about to paste. Sync is now **off** unless it is turned on (`DexPrefs.DEF_CLIP_SYNC`, and `clipboard_autosync: false` in the desktop's defaults), with the switch reworded to say what it costs. The rest of the separation was already there: the desktop is its own virtual display with its own focus, the phone keeps its own screen and its own apps, and `--audio-dup` means the phone keeps its own sound while the PC plays the desktop's. |
+| 8 | More Windows-feel extras | A **clipboard flyout** in the taskbar tray (the Win+V habit): the phone's own history, newest first, a tap to put an entry back on the phone's clipboard, a Clear row at the bottom. It is the phone's list — it never leaves the device — so it works with sharing off, which is now the default. Toggleable via `clipboard_list`. |
+
+### Not in this build, honestly
+
+* **#9 (phone apps behaving like desktop apps).** The three areas named — typing, window
+  behaviour, several windows at once — are all paths that need a phone in front of me to
+  see fail; guessing at them would be another round of "fixed" that is not. What is in
+  this build for typing is the IME fix from 0.7.1. What would settle the rest is one
+  screenshot or fifteen seconds of recording per complaint: which app, what was typed or
+  dragged, and what happened instead.
+
+---
+
 ## Next, in order
 
 1. **Taskbar auto-hide with hover reveal** — what the reporter of the taskbar

@@ -1827,7 +1827,10 @@ fn audio_companion_options(serial: &str, dup: bool) -> MirrorOptions {
         mouse_mode: None,
         video_codec: None,
         video_encoder: None,
-        clipboard_autosync: true,
+        // Off: the computer's clipboard is the computer's, the phone's is the
+        // phone's. Sharing is a Setting (the launcher's Stream & clipboard
+        // card, which pushes `clipboard.on` back up as a `cfg` request).
+        clipboard_autosync: false,
         audio_only: true,
         window: None,
         base_dpi: None,

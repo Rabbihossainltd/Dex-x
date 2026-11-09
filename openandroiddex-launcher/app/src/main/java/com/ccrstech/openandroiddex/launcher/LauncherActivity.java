@@ -654,6 +654,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     private PopupWindow exitPopup;
     private PopupWindow widgetPicker;
     private PopupWindow mediaPopup;
+    private PopupWindow clipPopup;
 
     // ── desktop widgets (AppWidgetHost) ──
     private DexWidgetHost widgetHost;
@@ -3958,6 +3959,25 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         gearLp.setMargins(0, 0, gap, 0);
         tray.addView(gear, gearLp);
 
+        // The clipboard, one tap from the taskbar — Win+V, in this desktop's
+        // own vocabulary. Unlike everything else in the tray it is the
+        // PHONE's clipboard: with sharing off (the default) this is the only
+        // place the phone's copies are kept, and Copy here puts one back on
+        // the phone for its own apps to paste.
+        if (DexPrefs.getBool(this, DexPrefs.KEY_CLIP_HISTORY_ON, DexPrefs.DEF_CLIP_HISTORY_ON)) {
+            ImageView clip = new ImageView(this);
+            clip.setImageResource(android.R.drawable.ic_menu_edit);
+            clip.setColorFilter(theme.textDim);
+            int clipPad = dp(compact ? 7 : 8);
+            clip.setPadding(clipPad, clipPad, clipPad, clipPad);
+            clip.setBackground(tapBackground(0x00000000, theme.hover, 10));
+            clip.setContentDescription(getString(R.string.lx_clipboard));
+            clip.setOnClickListener(v -> toggleClipboardPopup());
+            LinearLayout.LayoutParams clipLp = new LinearLayout.LayoutParams(square, square);
+            clipLp.setMargins(0, 0, gap, 0);
+            tray.addView(clip, clipLp);
+        }
+
         // PC-window fullscreen toggle; executed by the PC via the request
         // queue, icon confirmed by the running broadcast's "fs" extra
         fsButton = navButton("⛶", getString(R.string.lx_fullscreen), v -> {
@@ -4305,6 +4325,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         if (exitPopup != null && exitPopup.isShowing()) exitPopup.dismiss();
         if (widgetPicker != null && widgetPicker.isShowing()) widgetPicker.dismiss();
         if (mediaPopup != null && mediaPopup.isShowing()) mediaPopup.dismiss();
+        if (clipPopup != null && clipPopup.isShowing()) clipPopup.dismiss();
         if (padPopup != null && padPopup.isShowing()) padPopup.dismiss();
         if (homePopup != null && homePopup.isShowing()) homePopup.dismiss();
         recentsPopup = null;
@@ -4315,6 +4336,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         exitPopup = null;
         widgetPicker = null;
         mediaPopup = null;
+        clipPopup = null;
         padPopup = null;
         homePopup = null;
     }
@@ -4548,6 +4570,86 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         dismissPopups();
         batteryPopup = makePopup(buildBatteryView());
         showTrayPopup(batteryPopup, Gravity.END);
+    }
+
+    // ── Clipboard flyout: what the phone copied, newest first ─────────────
+
+    private void toggleClipboardPopup() {
+        if (clipPopup != null && clipPopup.isShowing()) {
+            dismissPopups();
+            return;
+        }
+        dismissPopups();
+        clipPopup = makePopup(buildClipboardView());
+        showTrayPopup(clipPopup, Gravity.END);
+    }
+
+    /**
+     * The history, a tap each to copy back, and the one destructive row at the
+     * bottom. Long entries are cut to two lines with an ellipsis: the list is a
+     * reminder of what was copied, not a reader.
+     */
+    private View buildClipboardView() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(8), dp(8), dp(8), dp(8));
+
+        TextView header = new TextView(this);
+        header.setText(getString(R.string.lx_clipboard));
+        header.setTextColor(theme.textFaint);
+        header.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(11));
+        header.setPadding(dp(10), dp(4), dp(10), dp(6));
+        panel.addView(header);
+
+        java.util.List<String> items = DexClipboard.history(this);
+        if (items.isEmpty()) {
+            TextView empty = new TextView(this);
+            empty.setText(getString(R.string.lx_clipboard_empty));
+            empty.setTextColor(theme.textDim);
+            empty.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(12.5f));
+            empty.setPadding(dp(10), dp(8), dp(10), dp(10));
+            panel.addView(empty);
+            return panel;
+        }
+
+        int rows = 0;
+        for (String entry : items) {
+            if (rows++ == 10) break;
+            TextView row = new TextView(this);
+            row.setText(entry.length() > 120 ? entry.substring(0, 120) + "…" : entry);
+            row.setTextColor(theme.text);
+            row.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(12.5f));
+            row.setMaxLines(2);
+            row.setEllipsize(TextUtils.TruncateAt.END);
+            row.setPadding(dp(10), dp(7), dp(10), dp(7));
+            row.setBackground(tapBackground(0x00000000, theme.hover, 9));
+            final String value = entry;
+            row.setOnClickListener(v -> {
+                DexClipboard.set(this, value);
+                Toast.makeText(this, getString(R.string.lx_clipboard_copied), Toast.LENGTH_SHORT).show();
+                dismissPopups();
+            });
+            panel.addView(row, new LinearLayout.LayoutParams(dp(300),
+                    ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+
+        LinearLayout footer = new LinearLayout(this);
+        footer.setOrientation(LinearLayout.HORIZONTAL);
+        footer.setGravity(Gravity.END);
+        footer.setPadding(0, dp(6), 0, 0);
+        TextView clear = new TextView(this);
+        clear.setText(getString(R.string.lx_clipboard_clear));
+        clear.setTextColor(theme.danger);
+        clear.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(12));
+        clear.setPadding(dp(10), dp(6), dp(10), dp(6));
+        clear.setBackground(tapBackground(0x00000000, theme.hover, 9));
+        clear.setOnClickListener(v -> {
+            DexClipboard.clearHistory(this);
+            dismissPopups();
+        });
+        footer.addView(clear);
+        panel.addView(footer);
+        return panel;
     }
 
     private void addInfoRow(LinearLayout panel, String emoji, String label, String value) {
