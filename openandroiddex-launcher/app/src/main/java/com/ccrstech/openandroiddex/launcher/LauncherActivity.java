@@ -1157,6 +1157,10 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // Keep this process's own last few hundred log lines where the
+        // diagnostics screen can read them — logcat needs a permission this
+        // app does not have.
+        DexLog.init(getApplicationContext());
         // Before anything is built: the desktop is not a phone screen, and a
         // desktop drawn on the phone is the "it opened like a launcher" report.
         // Hand over to the one screen this app shows there and stop.

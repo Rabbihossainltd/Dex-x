@@ -83,6 +83,12 @@ final class CaptionFallback {
         if (f != null) f.stop();
     }
 
+    /** How many bars from here are on screen — the diagnostics screen's number. */
+    static int barCount() {
+        CaptionFallback f = instance;
+        return f == null ? 0 : f.bars.size();
+    }
+
     /** Whether a bar from here is on screen for {@code taskId} right now. */
     static boolean hasBar(int taskId) {
         CaptionFallback f = instance;

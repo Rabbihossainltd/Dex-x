@@ -303,7 +303,10 @@ public final class CaptionService extends AccessibilityService {
      */
     static String problem() {
         CaptionService s = live;
-        if (s == null || !s.wmReachable()) return "service";
+        if (s == null) return "service";
+        // Bound but the daemon is dead is NOT a service problem: the two have
+        // different fixes, and the pill used to blame accessibility for both.
+        if (!s.wmReachable()) return "daemon";
         if (s.desktopDisplayId < 0) return "daemon";
         if (s.stalled()) return "nostrip";
         return null;
@@ -341,6 +344,11 @@ public final class CaptionService extends AccessibilityService {
      * that one is what the tray's pill shows, this one is what the fallback
      * renderer asks before it takes a window over.
      */
+    /** Is the accessibility service alive in this process right now? */
+    static boolean isLive() {
+        return live != null;
+    }
+
     static boolean captionAvailable() {
         CaptionService s = live;
         return s != null && s.wmReachable() && s.desktopDisplayId >= 0;

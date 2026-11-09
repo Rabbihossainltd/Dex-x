@@ -86,6 +86,10 @@ public class ConnectActivity extends android.app.Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // Keep this process's own last few hundred log lines where the
+        // diagnostics screen can read them — logcat needs a permission this
+        // app does not have.
+        DexLog.init(getApplicationContext());
         theme = DexTheme.of(this);
         // This screen is reachable by tapping the app's icon, so it is the one
         // place a phone left holding the home role can be handed back: with the
@@ -239,6 +243,14 @@ public class ConnectActivity extends android.app.Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         gapLp.leftMargin = dp(10);
         extras.addView(pill(getString(R.string.cx_about), this::showAbout), gapLp);
+        // Third pill: the state report. On this screen rather than buried in a
+        // menu because the phone is the only place the three answers exist —
+        // accessibility enabled, accessibility bound, window daemon answering —
+        // and every bug report so far has been a guess at them.
+        LinearLayout.LayoutParams gap2 = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        gap2.leftMargin = dp(10);
+        extras.addView(pill(getString(R.string.cx_diag), this::showDiagnostics), gap2);
 
         // ── About, the short form ──
         // Who made this, where to find them, and what the licences say. Part of
@@ -335,6 +347,53 @@ public class ConnectActivity extends android.app.Activity {
                 .setView(box)
                 .setPositiveButton(android.R.string.ok, null)
                 .setNeutralButton(R.string.upd_check, (d, w) -> UpdateCheck.checkNow(this))
+                .show();
+    }
+
+    /**
+     * The diagnostics screen: what THIS phone believes about the desktop.
+     *
+     * <p>Deliberately not a debug-only build flag. Every bug in this project so
+     * far has been reported as a screenshot of a symptom, and the three states
+     * that matter — accessibility enabled, accessibility bound, window daemon
+     * answering — are invisible from the outside, so the person reporting is
+     * the only one who can see them. One button, selectable text, and a copy.
+     */
+    private void showDiagnostics() {
+        String text = Diagnostics.report(this);
+        TextView body = new TextView(this);
+        body.setText(text);
+        body.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(11));
+        body.setTextColor(theme.text);
+        body.setTypeface(Typeface.MONOSPACE);
+        body.setTextIsSelectable(true);
+        body.setPadding(dp(16), dp(12), dp(16), dp(12));
+
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        scroll.addView(body);
+
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.cx_diag_title))
+                .setView(scroll)
+                .setPositiveButton(getString(R.string.cx_diag_copy), (d, w) -> {
+                    android.content.ClipboardManager cb =
+                            (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                    if (cb != null) {
+                        cb.setPrimaryClip(android.content.ClipData.newPlainText("Dex-X", text));
+                        Toast.makeText(this, getString(R.string.cx_diag_copied),
+                                Toast.LENGTH_LONG).show();
+                    }
+                })
+                .setNeutralButton(getString(R.string.cx_diag_share), (d, w) -> {
+                    Intent send = new Intent(Intent.ACTION_SEND)
+                            .setType("text/plain")
+                            .putExtra(Intent.EXTRA_TEXT, text);
+                    try {
+                        startActivity(Intent.createChooser(send, getString(R.string.cx_diag_title)));
+                    } catch (Exception ignored) {
+                    }
+                })
+                .setNegativeButton(android.R.string.cancel, null)
                 .show();
     }
 

@@ -128,6 +128,27 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.6 — a build that makes the phone answer
+
+Four releases in a row were guessed at from screenshots, and four in a row missed, because
+three things can break the desktop at once and **all three are silent**:
+
+* the accessibility service is not **enabled** (Android 13+ hides the switch behind
+  *Allow restricted settings* for a sideloaded app);
+* it is enabled but not **bound** (the phone refuses and says nothing);
+* the window daemon (**wmd**) is not answering — which takes the task list, the caption
+  strip, move, resize, the taskbar's app row and the phone-side repair with it.
+
+This release does not guess. It makes those three answerable in one tap.
+
+| What | Why |
+| --- | --- |
+| **Diagnostics** — a third pill on the connect screen | A plain-text report: the service running / enabled in Settings / what `problem()` answers; `PING` to wmd and the display it reports; every display with its real size and dpi; the full task list of the desktop display **and** of the phone's display, with windowing mode, rect, app bounds and package; how many fallback bars are up; and the last 160 lines of this process's own log. Selectable, with **Copy** and **Share**. |
+| The log is now kept on the phone | `logcat` needs `READ_LOGS`, which this app does not have — so the only copy of these lines was in a terminal on somebody else's computer. `DexLog` keeps the last 600 lines in memory and appends them to `Android/data/com.ccrstech.openandroiddex.launcher/files/dex-x.log`, which `adb pull` can reach. |
+| The pill blames the right component | It reported "the phone has not enabled window control" for **both** a missing service and a dead daemon. Those have different fixes; `problem()` now answers service → daemon → stuck, in that order. |
+
+Nothing else changed. If the desktop is still wrong, that text says which link is broken.
+
 ## v0.7.5 — the phone's screen is the phone's
 
 Reported with a screenshot: an app that is open on the desktop shows up on the phone
