@@ -1158,7 +1158,7 @@ pub fn adb_prepare_desktop(
     // hidden_api_policy=1 lets our launcher call setLaunchWindowingMode via
     // reflection — freeform from the first frame on decoration-free
     // displays, where the freeform-by-default machinery doesn't apply.
-    run_adb(
+    if let Err(e) = run_adb(
         &app,
         &[
             "-s",

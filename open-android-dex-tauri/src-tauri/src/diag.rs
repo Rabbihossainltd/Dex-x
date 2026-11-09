@@ -484,6 +484,9 @@ pub fn diag_collect(app: AppHandle, serial: Option<String>) -> Result<String, St
     let serial = serial
         .filter(|s| !s.trim().is_empty())
         .or_else(|| first_online_device(&app));
+    // Kept for the plumbing section below, which runs after `serial` is moved
+    // into the match on the next line.
+    let serial_for_plumbing = serial.clone();
     match serial {
         Some(serial) => {
             report.push_str(&format!("\n──── device {serial} ────\n"));
@@ -513,7 +516,7 @@ pub fn diag_collect(app: AppHandle, serial: Option<String>) -> Result<String, St
         if wmc.ping() { "OK" } else { "NO ANSWER" }
     ));
     report.push_str(&format!("desktop display: {:?}\n", wmc.desktop_display()));
-    if let Some(serial) = serial.clone().or_else(|| first_online_device(&app)) {
+    if let Some(serial) = serial_for_plumbing.or_else(|| first_online_device(&app)) {
         report.push_str(&format!(
             "wmd log (last 20 lines):\n{}\n",
             adb::run_adb(
