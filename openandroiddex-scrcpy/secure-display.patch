@@ -1,0 +1,67 @@
+diff --git a/server/src/main/java/com/genymobile/scrcpy/video/NewDisplayCapture.java b/server/src/main/java/com/genymobile/scrcpy/video/NewDisplayCapture.java
+index 37ba5ab..64259e6 100644
+--- a/server/src/main/java/com/genymobile/scrcpy/video/NewDisplayCapture.java
++++ b/server/src/main/java/com/genymobile/scrcpy/video/NewDisplayCapture.java
+@@ -33,6 +33,13 @@ public class NewDisplayCapture extends SurfaceCapture {
+     private static final int VIRTUAL_DISPLAY_FLAG_PUBLIC = android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC;
+     private static final int VIRTUAL_DISPLAY_FLAG_PRESENTATION = android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION;
+     private static final int VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY = android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY;
++    /**
++     * DisplayManager.VIRTUAL_DISPLAY_FLAG_SECURE: a display whose content is secure, so the windows
++     * that mark themselves secure (banking apps, password fields, the keyguard) are drawn on it
++     * instead of blanked. Creating one asks for CAPTURE_SECURE_VIDEO_OUTPUT, which the shell holds
++     * on some phones and not on others — see startNew.
++     */
++    private static final int VIRTUAL_DISPLAY_FLAG_SECURE = 1 << 2;
+     private static final int VIRTUAL_DISPLAY_FLAG_SUPPORTS_TOUCH = 1 << 6;
+     private static final int VIRTUAL_DISPLAY_FLAG_ROTATES_WITH_CONTENT = 1 << 7;
+     private static final int VIRTUAL_DISPLAY_FLAG_DESTROY_CONTENT_ON_REMOVAL = 1 << 8;
+@@ -76,6 +83,9 @@ public class NewDisplayCapture extends SurfaceCapture {
+ 
+     private int dpi;
+ 
++    /** The phone refused a secure display once: do not ask again, and say why only that once. */
++    private static boolean secureRefused;
++
+     // Open Android DeX: flex sizes in the computer screen's pixels, see DisplayScale
+     private float scale = 1f;
+     private Size windowSize; // the last size the client asked for, in its window coordinates
+@@ -240,6 +250,12 @@ public class NewDisplayCapture extends SurfaceCapture {
+             if (vdSystemDecorations) {
+                 flags |= VIRTUAL_DISPLAY_FLAG_SHOULD_SHOW_SYSTEM_DECORATIONS;
+             }
++            // Open Android DeX: secure windows draw here rather than blanking. The flag is a
++            // request the phone may refuse; secureRefused remembers the refusal for later displays
++            // so the same SecurityException is not thrown and caught on every window.
++            if (!secureRefused) {
++                flags |= VIRTUAL_DISPLAY_FLAG_SECURE;
++            }
+             if (Build.VERSION.SDK_INT >= AndroidVersions.API_33_ANDROID_13) {
+                 flags |= VIRTUAL_DISPLAY_FLAG_TRUSTED
+                         | VIRTUAL_DISPLAY_FLAG_OWN_DISPLAY_GROUP
+@@ -250,8 +266,23 @@ public class NewDisplayCapture extends SurfaceCapture {
+                             | VIRTUAL_DISPLAY_FLAG_DEVICE_DISPLAY_GROUP;
+                 }
+             }
+-            VirtualDisplay vd = ServiceManager.getDisplayManager()
+-                    .createNewVirtualDisplay("scrcpy", displaySize.getWidth(), displaySize.getHeight(), dpi, surface, flags);
++            VirtualDisplay vd;
++            try {
++                vd = ServiceManager.getDisplayManager()
++                        .createNewVirtualDisplay("scrcpy", displaySize.getWidth(), displaySize.getHeight(), dpi, surface, flags);
++            } catch (SecurityException e) {
++                if ((flags & VIRTUAL_DISPLAY_FLAG_SECURE) == 0) {
++                    throw e;
++                }
++                // This phone keeps CAPTURE_SECURE_VIDEO_OUTPUT to its own apps: no secure display,
++                // so secure windows stay blank — nothing else changes.
++                secureRefused = true;
++                Ln.w("This phone will not make a secure display for the shell (" + e.getMessage()
++                        + "): windows that mark themselves secure stay blank");
++                flags &= ~VIRTUAL_DISPLAY_FLAG_SECURE;
++                vd = ServiceManager.getDisplayManager()
++                        .createNewVirtualDisplay("scrcpy", displaySize.getWidth(), displaySize.getHeight(), dpi, surface, flags);
++            }
+             setCurrentVirtualDisplay(vd); // used for client resize
+             int virtualDisplayId = vd.getDisplay().getDisplayId();
+             // Before the line below: the computer starts using the display when it reads it

@@ -99,6 +99,15 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.1 — typing that stays on the computer, and secure windows
+
+| # | Asked for | What it took |
+| --- | --- | --- |
+| 5 | Typing on the PC must not raise the phone's keyboard; password and flagged screens must not go black | Two causes, two places. The keyboard: every `--new-display` now gets `--display-ime-policy=hide` (`scrcpy.rs`), so Android never puts the phone's IME on the desktop — without it the first focused field slid a phone-sized keyboard across the bottom of the window. The black screens: a virtual display can be asked for as a **secure** one (`VIRTUAL_DISPLAY_FLAG_SECURE`), and then secure windows are composited into the surface we own instead of being blanked — `secure-display.patch` for the desktop display, `AppServer.createDisplay` for a phone app's window. Both fall back honestly: if the phone refuses (`CAPTURE_SECURE_VIDEO_OUTPUT` is a signature permission the shell holds only on some builds) they retry without the flag and log the reason once. See `doc/secure-windows.md`. |
+| — | The daemon was reaching into the launcher for its video encoder | `LinuxStreamEncoder` was the one survivor of the Linux stream, kept only because `AppVideo` compiles it from the launcher's tree. It is `openandroiddex-wmd/src/.../StreamEncoder.java` now: the daemon owns the file it uses, and `build.sh`/`build.cmd` no longer name a path outside the module. Same for the `:linuxapp` module — deleted, with its `include`, which is what `assembleDebug` had been failing on. |
+
+---
+
 ## Next, in order
 
 1. **Taskbar auto-hide with hover reveal** — what the reporter of the taskbar

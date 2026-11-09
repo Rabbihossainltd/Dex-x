@@ -85,13 +85,25 @@ public final class AppServer {
     private static final int FLAG_TOUCH_FEEDBACK_DISABLED = 1 << 13;
     private static final int FLAG_OWN_FOCUS = 1 << 14;
     private static final int FLAG_DEVICE_DISPLAY_GROUP = 1 << 15;
+    /**
+     * DisplayManager.VIRTUAL_DISPLAY_FLAG_SECURE: the window's own display is a
+     * secure one, so the apps that mark their windows secure — banking apps,
+     * password fields, the keyguard — are drawn into it instead of being
+     * blanked. Needs CAPTURE_SECURE_VIDEO_OUTPUT, which the shell holds on some
+     * phones and not on others.
+     */
+    private static final int FLAG_SECURE_DISPLAY = 1 << 2;
     /** The flags that take a permission the shell may not hold on every build. */
-    private static final int FLAGS_PRIVILEGED = FLAG_TRUSTED | FLAG_OWN_FOCUS | FLAG_ALWAYS_UNLOCKED;
+    private static final int FLAGS_PRIVILEGED = FLAG_TRUSTED | FLAG_OWN_FOCUS | FLAG_ALWAYS_UNLOCKED
+            | FLAG_SECURE_DISPLAY;
     /** WindowManager.DISPLAY_IME_POLICY_HIDE: no on-screen keyboard; the computer's is the keyboard. */
     private static final int IME_POLICY_HIDE = 2;
 
     private static volatile boolean stopping;
     private static boolean trustedRefused;
+    /** The phone refused a secure display once: ask no more, and keep the reason for the log. */
+    private static boolean secureRefused;
+    private static String secureRefusedWhy;
     /** The computer's adb shell is still there: its stdin has not closed. */
     private static volatile boolean shellHeld = true;
 
@@ -427,6 +439,7 @@ public final class AppServer {
         // the window is turned, which the computer does), and no destroying the
         // content when it goes (the app goes back to the phone).
         int flags = FLAG_PUBLIC | FLAG_PRESENTATION | FLAG_OWN_CONTENT_ONLY | FLAG_SUPPORTS_TOUCH;
+        if (!secureRefused) flags |= FLAG_SECURE_DISPLAY;
         if (Build.VERSION.SDK_INT >= 30) flags |= FLAG_TRUSTED;
         if (Build.VERSION.SDK_INT >= 33) {
             flags |= FLAG_OWN_DISPLAY_GROUP | FLAG_ALWAYS_UNLOCKED | FLAG_TOUCH_FEEDBACK_DISABLED;
@@ -438,8 +451,26 @@ public final class AppServer {
                 trusted[0] = (flags & FLAG_TRUSTED) != 0;
                 return d;
             } catch (SecurityException e) {
+                SecurityException refused = e;
+                if ((flags & FLAG_SECURE_DISPLAY) != 0) {
+                    // Only the secure flag is new here: this phone keeps the
+                    // permission for its own apps. Ask again without it, and say
+                    // once what that costs — secure windows stay blank.
+                    secureRefused = true;
+                    secureRefusedWhy = e.getMessage();
+                    log("the phone will not make a secure display for the shell (" + e.getMessage()
+                            + ") — a window whose app marks it secure stays blank");
+                    flags &= ~FLAG_SECURE_DISPLAY;
+                    try {
+                        VirtualDisplay d = displays.createVirtualDisplay(DISPLAY_NAME, w, h, dpi, sink, flags);
+                        trusted[0] = (flags & FLAG_TRUSTED) != 0;
+                        return d;
+                    } catch (SecurityException again) {
+                        refused = again;
+                    }
+                }
                 trustedRefused = true;
-                log("the phone will not make a trusted display for the shell (" + e.getMessage()
+                log("the phone will not make a trusted display for the shell (" + refused.getMessage()
                         + ") — making untrusted ones: a window takes the keyboard once it has been clicked");
             }
         }

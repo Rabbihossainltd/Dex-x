@@ -345,6 +345,13 @@ fn build_args(opts: &MirrorOptions) -> Vec<String> {
         if opts.vd_no_decorations {
             args.push("--no-vd-system-decorations".into());
         }
+        // Typing here is typing on the computer's keyboard, so the display gets
+        // no on-screen keyboard at all: without this Android puts the phone's
+        // IME on the new display, and a keyboard the size of the desktop slides
+        // up over the app the moment a field is focused — the one thing a DeX
+        // window must never do. Android turns our key events into text through
+        // the same input path a hardware keyboard uses (doc/secure-windows.md, "Typing").
+        args.push("--display-ime-policy=hide".into());
     }
     // scrcpy would size the window to fit the screen less a 96-point margin,
     // which shows a display fitted to the screen at ~0.9x: a little soft, the
