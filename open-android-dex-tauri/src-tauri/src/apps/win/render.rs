@@ -954,7 +954,6 @@ impl Renderer {
             for (hit, r) in [
                 (Hit::Back, bar.back),
                 (Hit::More, bar.more),
-                (Hit::Sound, bar.sound),
                 (Hit::Min, bar.min),
                 (Hit::Max, bar.max),
                 (Hit::Close, bar.close),
@@ -980,7 +979,6 @@ impl Renderer {
             };
             glyph(Hit::Back, 0xE72B, bar.back)?;
             glyph(Hit::More, 0xE700, bar.more)?;
-            glyph(Hit::Sound, 0xE767, bar.sound)?;
             glyph(Hit::Min, 0xE921, bar.min)?;
             glyph(Hit::Max, if look.maximized { 0xE923 } else { 0xE922 }, bar.max)?;
             glyph(Hit::Close, 0xE8BB, bar.close)?;
@@ -1024,10 +1022,9 @@ impl Renderer {
             self.d2d.FillRectangle(&rectf(0, 0, w, h), &self.brush(theme.bar)?);
             let ink = self.brush(theme.ink)?;
             let white = self.brush(0xFFFFFF)?;
-            let buttons: [(Hit, u16, RECT); 6] = [
+            let buttons: [(Hit, u16, RECT); 5] = [
                 (Hit::Back, 0xE72B, top.back),
                 (Hit::More, 0xE700, top.more),
-                (Hit::Sound, 0xE767, top.sound),
                 (Hit::Min, 0xE921, top.min),
                 (Hit::Windowed, 0xE73F, top.windowed),
                 (Hit::Close, 0xE8BB, top.close),

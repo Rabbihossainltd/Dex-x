@@ -2893,13 +2893,34 @@ public final class CaptionService extends AccessibilityService {
                     // windows (ours: Settings and Linux). Absent = any window
                     // of the package, the taskbar's meaning.
                     String activity = i.getStringExtra("activity");
+                    // Which one, when the package has several.
+                    //
+                    // The map is a HashMap: iterating it and taking the first
+                    // match restores an ARBITRARY window of the package. For our
+                    // own package that is Settings vs. File transfer vs. Task
+                    // manager — the tile you pressed could un-hide a different
+                    // window and leave the one you wanted away. An explicit
+                    // `activity` wins; otherwise the most RECENTLY minimised,
+                    // which is the one a taskbar click means.
+                    int bestId = -1;
+                    Min best = null;
                     for (Map.Entry<Integer, Min> e : minimised.entrySet()) {
-                        if (!pkg.equals(e.getValue().pkg)) continue;
-                        if (activity != null && !activity.equals(e.getValue().activity)) continue;
-                        final int taskId = e.getKey();
-                        final int display = desktopDisplayId;
+                        Min m = e.getValue();
+                        if (!pkg.equals(m.pkg)) continue;
+                        if (activity != null) {
+                            if (!activity.equals(m.activity)) continue;
+                        } else if (best != null && m.since <= best.since) {
+                            continue;
+                        }
+                        bestId = e.getKey();
+                        best = m;
+                    }
+                    if (best != null) {
+                        final int taskId = bestId;
+                        // The task's OWN display, not "the desktop's": a
+                        // minimise can outlive a display id changing under it.
+                        final int display = best.display;
                         wm.post(() -> wm.show(display, taskId));
-                        break;
                     }
                     // The reconcile drops it from `minimised` once it is visible again.
                 }

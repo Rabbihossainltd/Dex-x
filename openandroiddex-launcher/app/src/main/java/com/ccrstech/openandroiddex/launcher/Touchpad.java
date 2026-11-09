@@ -800,40 +800,19 @@ final class Touchpad implements TouchpadGestures.Listener {
         panel.addView(padFrame, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        // ── the desktop's own three, as the taskbar has them ──
-        LinearLayout nav = new LinearLayout(ui);
-        nav.setOrientation(LinearLayout.HORIZONTAL);
-        nav.setPadding(0, dp(8), 0, 0);
-        nav.addView(navButton("◁", ui.getString(R.string.lx_back),
-                v -> pointer.key(KeyEvent.KEYCODE_BACK)), navParams());
-        if (host == null) {
-            // Home and Recents are the desktop's; the computer's windows have Back alone.
-            nav.addView(navButton("○", ui.getString(R.string.lx_home),
-                    v -> act("home")), navParams());
-            nav.addView(navButton("▢", ui.getString(R.string.lx_recent_apps),
-                    v -> act("openapps")), navParams());
-        }
-        panel.addView(nav, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        // ── and NO navigation row ──
+        //
+        // This panel used to end in our own ◁ ○ ▢ — a three-key navigation bar,
+        // drawn by us, under a pad that is only ever opened OVER the desktop.
+        // Reported three times ("navigation bar ekhono ache") and removed from
+        // the taskbar twice; this copy survived because it lives in the pad, not
+        // in the bar. The phone's own gesture bar is behind this panel and its
+        // three-finger gestures are the pad's own: tap = Back, swipe up = the
+        // open apps, swipe down = show the desktop, all of them mapped in
+        // Settings → Touchpad. The panel is not the place to draw a second set.
 
         DexFonts.applyTo(app, panel);
         return panel;
-    }
-
-    private LinearLayout.LayoutParams navParams() {
-        return new LinearLayout.LayoutParams(0, dp(60), 1f);
-    }
-
-    private TextView navButton(String glyph, String label, View.OnClickListener click) {
-        TextView b = new TextView(ui);
-        b.setText(glyph + "\n" + label);
-        b.setTextColor(PAD_TEXT);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        b.setGravity(Gravity.CENTER);
-        b.setBackground(ripple(16));
-        b.setContentDescription(label);
-        b.setOnClickListener(click);
-        return b;
     }
 
     private TextView iconButton(String glyph, String description, View.OnClickListener click) {

@@ -3727,7 +3727,9 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.setBaselineAligned(false);
-            row.setPadding(dp(8), 0, 0, 0);
+            // The navigation cluster's 4dp of left padding, kept: the Start
+            // button should not sit flush against the bar's edge.
+            row.setPadding(dp(4), 0, 0, 0);
             // the one elastic cluster — the open-apps strip inside it scrolls
             row.addView(apps, new LinearLayout.LayoutParams(
                     0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
@@ -3737,14 +3739,14 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
             bar = row;
         } else {
             FrameLayout frame = new FrameLayout(this);
-            // The open-apps strip starts at the LEFT edge now that nothing sits
-            // in front of it, and the tray keeps the right one. Both are
-            // fill-parent-with-gravity so the Windows shell's centred cluster
-            // still lands in the middle of the bar rather than the middle of a
-            // shrunken box.
+            // WRAP + CENTRE, which is what this was before the navigation
+            // cluster was removed — removing a child must not re-align the two
+            // that stayed. (0.7.12 shipped this as MATCH_PARENT/FILL, which
+            // pinned the Windows 11 cluster to the left edge: a regression
+            // caught by re-reading the arithmetic, not by the build.)
             frame.addView(apps, new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
-                    Gravity.FILL));
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT,
+                    Gravity.CENTER));
             frame.addView(tray, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT,
                     Gravity.END | Gravity.CENTER_VERTICAL));
@@ -3873,7 +3875,15 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         return btn;
     }
 
-    /** Taskbar's left cluster: back · home · open apps. */
+    /**
+     * The DeX shell's ◁ ○ ▢ cluster. KEPT UNREFERENCED, ON PURPOSE.
+     *
+     * <p>Nothing calls it: the taskbar builds no navigation cluster at all (see
+     * {@code buildTaskbar}). It stays in the file as the record of what was
+     * removed and why — a gone view that is still built is one layout pass away
+     * from being visible, which is exactly how this survived two rounds of
+     * "navigation bar ekhono ache".
+     */
     private View buildNavCluster() {
         LinearLayout left = new LinearLayout(this);
         left.setOrientation(LinearLayout.HORIZONTAL);
@@ -3948,6 +3958,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
      * and Back is not a convenience, it is how half the apps on it are
      * dismissed. Anchored where it cannot push the centred cluster off centre.
      */
+    /** The Windows shell's single ◁ — unreferenced, as {@link #buildNavCluster} is. */
     private View buildWin11NavCluster() {
         LinearLayout left = new LinearLayout(this);
         left.setOrientation(LinearLayout.HORIZONTAL);

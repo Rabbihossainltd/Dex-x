@@ -25,7 +25,9 @@ pub enum Hit {
     Close,
     /// The bar itself: dragging moves the window.
     Caption,
-    /// Where the phone's sound plays: a menu.
+    /// Where the phone's sound USED to be chosen. Kept for the hit codes (a
+    /// code is a number on the wire, and renumbering them is a bug), never
+    /// returned by `hit`/`top_hit`, and no longer drawn.
     Sound,
     More,
     /// The full-screen bar's way out of full screen.
@@ -116,8 +118,12 @@ pub fn hit(width: i32, scale: f32, x: i32, y: i32) -> Hit {
         Hit::Max
     } else if inside(&b.min, x, y) {
         Hit::Min
-    } else if inside(&b.sound, x, y) {
-        Hit::Sound
+    // No `b.sound` here any more. "Where the sound plays" was a chooser, and a
+    // chooser for the phone's sound is exactly what the user asked to have
+    // taken out of the UI — it survived two rounds in this title bar because it
+    // lives in the Windows shell, not on the phone. The rectangle still exists
+    // (it costs nothing and the layout arithmetic is tested), but a click in it
+    // is a caption click now: the window drags.
     } else if inside(&b.back, x, y) {
         Hit::Back
     } else if inside(&b.more, x, y) {
@@ -190,8 +196,6 @@ pub fn top_hit(width: i32, scale: f32, x: i32, y: i32) -> Hit {
         Hit::Windowed
     } else if inside(&t.min, x, y) {
         Hit::Min
-    } else if inside(&t.sound, x, y) {
-        Hit::Sound
     } else if inside(&t.back, x, y) {
         Hit::Back
     } else if inside(&t.more, x, y) {
@@ -220,12 +224,21 @@ mod tests {
         assert_eq!(hit(412, 1.0, 150, 40), Hit::None);
     }
 
+    /// The slot "where the sound plays" used to fill is caption now.
+    ///
+    /// That chooser is gone — the sound always comes to the computer, and the
+    /// phone stops playing it while the desktop is up, so there is nothing to
+    /// choose. The rectangle is still part of the layout's arithmetic (moving it
+    /// would move every button after it); what changed is that nothing answers
+    /// a click there any more, which is what this asserts.
     #[test]
-    fn the_sound_button_is_just_before_minimise() {
+    fn the_old_sound_slot_is_a_caption_now() {
         let b = bar(412, 1.0);
         assert_eq!((b.sound.left, b.sound.right), (234, 274));
-        assert_eq!(hit(412, 1.0, 250, 10), Hit::Sound);
+        assert_eq!(hit(412, 1.0, 250, 10), Hit::Caption);
         assert_eq!(hit(412, 1.0, 233, 10), Hit::Caption);
+        // …and it is still reachable by its code, because codes are numbers on
+        // a wire and renumbering them is how a hover sticks to the wrong button.
         assert_eq!(Hit::from_code(Hit::Sound.code()), Hit::Sound);
     }
 
@@ -245,7 +258,7 @@ mod tests {
         assert_eq!(top_hit(1920, 1.0, 750, 10), Hit::Back);
         assert_eq!(top_hit(1920, 1.0, 790, 10), Hit::More);
         assert_eq!(top_hit(1920, 1.0, 960, 10), Hit::Caption);
-        assert_eq!(top_hit(1920, 1.0, 1030, 10), Hit::Sound);
+        assert_eq!(top_hit(1920, 1.0, 1030, 10), Hit::Caption);
         assert_eq!(top_hit(1920, 1.0, 1070, 10), Hit::Min);
         assert_eq!(top_hit(1920, 1.0, 1110, 10), Hit::Windowed);
         assert_eq!(top_hit(1920, 1.0, 1179, 27), Hit::Close);

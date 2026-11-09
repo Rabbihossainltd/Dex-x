@@ -128,6 +128,40 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.13 — the re-read: four things 0.7.12 claimed or missed
+
+Asked to go back over every report instead of trusting the last round. Four defects came out of it,
+one of them mine, from 0.7.12, shipped an hour earlier.
+
+| What the re-read found | Where | Fix |
+| --- | --- | --- |
+| **The navigation row was still there** — in the **touchpad**, not the taskbar. The pad's panel ended in our own ◁ ○ ▢ (Back · Home · Recents). 0.7.12 removed the taskbar's cluster and the release notes said "removed everywhere"; this copy survived in `Touchpad.java`, which is a different window on the same desktop. | `Touchpad.java` 807–814 | Deleted, with its two now-unused helpers. The pad's own three-finger gestures already are those three actions (tap = Back, up = open apps, down = show desktop), and they are mapped in Settings → Touchpad. |
+| **A regression I introduced in 0.7.12**: removing the navigation child from the taskbar's `FrameLayout` also changed the *remaining* child from `WRAP_CONTENT`+`CENTER` to `MATCH_PARENT`+`FILL`. The Windows 11 cluster is that child, and a fill-parent child aligns its content to the LEFT — the centred Windows taskbar would have jumped to the left edge. | `LauncherActivity.buildTaskbar` | Back to `WRAP_CONTENT`+`Gravity.CENTER`, which is what it was before the cluster was removed. Removing a child must not re-align the ones that stayed. |
+| **The sound chooser was still in the UI** — "Where the sound plays", on the title bar of every app window in the Windows shell (and on the full-screen bar). Every round so far removed it from the *phone's* screens; it lived in the computer's. It also still worked: picking a phone output routes the phone's audio back through the daemon. | `apps/win/frame.rs` (`hit`, `top_hit`), `apps/win/render.rs` | Nothing answers a click in that slot any more and no speaker glyph is drawn. The hit-test returns `Caption` there, so the window drags. The rectangle stays in the layout arithmetic (moving it would move every caption button after it), and `Hit::Sound` keeps its wire code. |
+| **Restoring a minimised window could un-hide the wrong one.** `CaptionService`'s restore receiver walked the `minimised` map — a `HashMap` — and took the *first* package match. For a package with several windows (ours: Settings, File transfer, Task manager) that is arbitrary. It also addressed the task by `desktopDisplayId` rather than the display the task was minimised on. | `CaptionService.restoreReceiver` | An explicit `activity` wins; otherwise the most *recently* minimised window, which is what a taskbar click means. The un-hide uses `Min.display`, the display the task id was recorded on. |
+
+### Also in this round
+
+* **The resize gesture now says what it did.** One `DexLog.step` line per gesture — edge, dx, dy, and
+  whether the platform sent `ACTION_CANCEL`. "Resize only works where it is drawn" cannot be settled
+  from source: it turns on whether a device keeps delivering MOVE events to a 40 dp overlay after the
+  pointer leaves it, and that differs by device. Next report will have the number in the log.
+* **The two dead navigation builders are labelled as such** in `LauncherActivity` rather than left
+  looking live.
+
+### What the re-read confirmed as still broken, with no fix in this build
+
+1. **UAC "Unknown publisher"** — needs a CA-issued code-signing certificate. Unchanged.
+2. **Ctrl+V paste** — unchanged from 0.7.11.
+3. **Minimise animation** — unchanged.
+4. **QR scanner inside the APK** — not built.
+5. **`FLAG_SECURE` windows still black** — not solved.
+6. **Resize from a window's own bottom-right corner** — our chrome owns the strip, not the frame.
+   Still a rewrite, not a patch.
+7. **`--audio-dup` is gone, but not every app can be captured.** Apps that opt out of playback
+   capture (most DRM video) keep their sound on the phone; nothing on the computer's side can change
+   that.
+
 ## v0.7.12 — the pointer, the bar and the sound, traced to the line
 
 Nine reports. Each one below is traced to the line that causes it, not to a guess; where a report

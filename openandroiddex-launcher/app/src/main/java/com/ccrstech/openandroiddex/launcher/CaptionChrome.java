@@ -174,6 +174,18 @@ final class CaptionChrome extends FrameLayout {
                             int dx = Math.round(e.getRawX() - downX);
                             int dy = Math.round(e.getRawY() - downY);
                             propose(edge, dx, dy);
+                            // One line per gesture, and only on the diagnostics
+                            // log: "the resize grip only works where it is
+                            // drawn" cannot be settled from source alone — it
+                            // depends on whether the platform keeps delivering
+                            // MOVEs to a 40 dp overlay after the pointer leaves
+                            // it, which differs by device. With this, the next
+                            // report has a number: what the gesture actually
+                            // moved, and whether the drag was CANCELLED.
+                            DexLog.step("caption", "resize by hand: edge=" + edge
+                                    + " dx=" + dx + " dy=" + dy
+                                    + (e.getActionMasked() == MotionEvent.ACTION_CANCEL
+                                            ? " (cancelled)" : ""));
                         }
                         active = false;
                         return true;
