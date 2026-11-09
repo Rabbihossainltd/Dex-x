@@ -17,7 +17,6 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.view.Surface;
 
-import com.ccrstech.openandroiddex.launcher.LinuxStreamEncoder;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -56,7 +55,7 @@ import java.util.concurrent.TimeUnit;
  * <p>Everything GL — the context, the texture, each encoder's input surface
  * and the draws — lives on this window's own thread.
  * Each encoder's output is drained on a thread of its own and handed to
- * {@link LinuxStreamEncoder.Output}, which may block: that is how a slow link
+ * {@link StreamEncoder.Output}, which may block: that is how a slow link
  * slows the encoder down rather than piling frames up.
  */
 final class AppVideo {
@@ -199,7 +198,7 @@ final class AppVideo {
      * on the display goes in at once, so the computer is not left waiting for
      * something in the app to move.
      */
-    Encoder start(int bitrate, int fps, Gate gate, LinuxStreamEncoder.Output out) throws IOException {
+    Encoder start(int bitrate, int fps, Gate gate, StreamEncoder.Output out) throws IOException {
         return call(() -> {
             release();
             Codec c = direct ? newDirectCodec(bitrate, fps, out) : newCodec(bitrate, fps, out);
@@ -481,11 +480,11 @@ final class AppVideo {
         final Surface input;
         final EGLSurface surface;
         final Encoder info;
-        final LinuxStreamEncoder.Output out;
+        final StreamEncoder.Output out;
         final Thread drain;
         volatile boolean running = true;
 
-        Codec(MediaCodec media, Surface input, EGLSurface surface, Encoder info, LinuxStreamEncoder.Output out) {
+        Codec(MediaCodec media, Surface input, EGLSurface surface, Encoder info, StreamEncoder.Output out) {
             this.media = media;
             this.input = input;
             this.surface = surface;
@@ -515,8 +514,8 @@ final class AppVideo {
                                 b.limit(bi.offset + bi.size);
                                 b.get(buf, 0, bi.size);
                                 int flags = 0;
-                                if ((bi.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0) flags |= LinuxStreamEncoder.FLAG_KEY;
-                                if ((bi.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) flags |= LinuxStreamEncoder.FLAG_CONFIG;
+                                if ((bi.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0) flags |= StreamEncoder.FLAG_KEY;
+                                if ((bi.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) flags |= StreamEncoder.FLAG_CONFIG;
                                 out.packet(buf, bi.size, bi.presentationTimeUs, flags);
                             }
                         }
@@ -533,16 +532,16 @@ final class AppVideo {
         }
     }
 
-    private Codec newCodec(int bitrate, int fps, LinuxStreamEncoder.Output out) throws IOException {
+    private Codec newCodec(int bitrate, int fps, StreamEncoder.Output out) throws IOException {
         List<String> tried = new ArrayList<>();
-        for (MediaCodecInfo info : LinuxStreamEncoder.candidates()) {
+        for (MediaCodecInfo info : StreamEncoder.candidates()) {
             MediaCodecInfo.VideoCapabilities vc;
             try {
                 vc = info.getCapabilitiesForType(MIME).getVideoCapabilities();
             } catch (Exception e) {
                 continue;
             }
-            int[] size = LinuxStreamEncoder.fit(vc, srcW, srcH, fps);
+            int[] size = StreamEncoder.fit(vc, srcW, srcH, fps);
             if (size == null) {
                 tried.add(info.getName() + " (no size)");
                 continue;
@@ -552,7 +551,7 @@ final class AppVideo {
             EGLSurface surface = EGL14.EGL_NO_SURFACE;
             try {
                 media = MediaCodec.createByCodecName(info.getName());
-                int attempt = LinuxStreamEncoder.configure(media, info, size[0], size[1], bitrate, fps);
+                int attempt = StreamEncoder.configure(media, info, size[0], size[1], bitrate, fps);
                 input = media.createInputSurface();
                 surface = EGL14.eglCreateWindowSurface(egl, config, input, new int[]{EGL14.EGL_NONE}, 0);
                 if (surface == EGL14.EGL_NO_SURFACE) {
@@ -563,7 +562,7 @@ final class AppVideo {
                 // Swap whenever asked, never held for a vsync: the encoder is the only consumer.
                 EGL14.eglSwapInterval(egl, 0);
                 boolean scaled = size[0] < srcW || size[1] < srcH;
-                Encoder e = new Encoder(info.getName(), LinuxStreamEncoder.isHardware(info), size[0], size[1],
+                Encoder e = new Encoder(info.getName(), StreamEncoder.isHardware(info), size[0], size[1],
                         srcW, srcH, scaled, bitrate, fps, attempt == 0);
                 Codec c = new Codec(media, input, surface, e, out);
                 c.drain.start();
@@ -587,16 +586,16 @@ final class AppVideo {
     }
 
     /** An encoder whose input surface the display draws into itself: no GL at all. */
-    private Codec newDirectCodec(int bitrate, int fps, LinuxStreamEncoder.Output out) throws IOException {
+    private Codec newDirectCodec(int bitrate, int fps, StreamEncoder.Output out) throws IOException {
         List<String> tried = new ArrayList<>();
-        for (MediaCodecInfo info : LinuxStreamEncoder.candidates()) {
+        for (MediaCodecInfo info : StreamEncoder.candidates()) {
             MediaCodecInfo.VideoCapabilities vc;
             try {
                 vc = info.getCapabilitiesForType(MIME).getVideoCapabilities();
             } catch (Exception e) {
                 continue;
             }
-            int[] size = LinuxStreamEncoder.fit(vc, srcW, srcH, fps);
+            int[] size = StreamEncoder.fit(vc, srcW, srcH, fps);
             // The display draws at its own size into whatever surface it has: a
             // coded size other than the display's would scale every frame.
             if (size == null || size[0] < srcW || size[1] < srcH) {
@@ -607,10 +606,10 @@ final class AppVideo {
             Surface input = null;
             try {
                 media = MediaCodec.createByCodecName(info.getName());
-                int attempt = LinuxStreamEncoder.configure(media, info, srcW, srcH, bitrate, fps);
+                int attempt = StreamEncoder.configure(media, info, srcW, srcH, bitrate, fps);
                 input = media.createInputSurface();
                 media.start();
-                Encoder e = new Encoder(info.getName(), LinuxStreamEncoder.isHardware(info), srcW, srcH,
+                Encoder e = new Encoder(info.getName(), StreamEncoder.isHardware(info), srcW, srcH,
                         srcW, srcH, false, bitrate, fps, attempt == 0);
                 Codec c = new Codec(media, input, EGL14.EGL_NO_SURFACE, e, out);
                 c.drain.start();

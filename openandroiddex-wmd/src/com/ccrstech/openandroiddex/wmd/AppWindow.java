@@ -8,7 +8,6 @@ import android.os.SystemClock;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 
-import com.ccrstech.openandroiddex.launcher.LinuxStreamEncoder;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -49,7 +48,7 @@ import java.util.List;
  * for; a second in which a frame waited on the link for a fifth of it drops the
  * bitrate by 30 %, three seconds it kept up raise it by 25 %.
  */
-final class AppWindow implements LinuxStreamEncoder.Output, AppVideo.Gate {
+final class AppWindow implements StreamEncoder.Output, AppVideo.Gate {
 
     /** The sizes a window may ask for: what an encoder takes, and what a window can be. */
     static final int MIN_W = 160, MIN_H = 160, MAX_W = 4096, MAX_H = 4096;
@@ -755,7 +754,7 @@ final class AppWindow implements LinuxStreamEncoder.Output, AppVideo.Gate {
             }
             return;
         }
-        if ((flags & LinuxStreamEncoder.FLAG_CONFIG) != 0) return;
+        if ((flags & StreamEncoder.FLAG_CONFIG) != 0) return;
         if (!direct) {
             synchronized (pace) {
                 if (inFlight > 0) inFlight--;

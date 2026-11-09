@@ -285,7 +285,7 @@ public final class AppServer {
                 // A phone-sized window: what most first windows are.
                 AppVideo v = AppVideo.open("warm", 400, 864);
                 try {
-                    v.start(1_000_000, 30, () -> 0, new com.ccrstech.openandroiddex.launcher.LinuxStreamEncoder.Output() {
+                    v.start(1_000_000, 30, () -> 0, new com.ccrstech.openandroiddex.wmd.StreamEncoder.Output() {
                         @Override
                         public void packet(byte[] data, int len, long ptsUs, int flags) {
                         }
