@@ -128,6 +128,42 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.22 — the audit's own mistakes, and the wire that had no test
+
+Ran the audit again and fixed what was left. Two of the previous audit's findings turned out
+to be **wrong**, and that is recorded here rather than quietly dropped.
+
+### Corrections to the audit I wrote
+
+| finding | the truth |
+| --- | --- |
+| "the daemon socket has no authentication" | **It does.** `Peers.uidOf()` reads `/proc/net/tcp{,6}` for the caller's uid and accepts only root and the shell uid as the PC; `AppServer` uses `getPeerCredentials()` and refuses everything but shell/root. The check is real, deliberate and documented in both files. |
+| "docker/linux/signal are scripts with no build hook" | **They have one.** `scripts/build-launcher-apk.mjs` copies `linux-*.sh` and `docker-*.sh` into the APK's assets on every build and fails it if one is missing; `-signal` is described in the app's own settings text. |
+
+Both came from reporting before verifying — the exact habit that produced four releases of
+wrong fixes.
+
+### Fixed
+
+| what | what was wrong | now |
+| --- | --- | --- |
+| the phone↔daemon wire had no test | `Wm.TaskRec.line()` writes sixteen fields, `WmClient` reads them by index, in two directories nothing compared. Insert a field on one side and the other silently misreads. | `tools/protocol-test.py` compares both sources field by field in order, and every verb the client sends against the verbs the daemon answers. In CI. |
+| five windows meant five `dumpsys` calls | the `CAPTION` verb shelled out per task; a shell-out is a fork plus a full window-list walk on a phone already encoding video | `windowDump()` — one dump per probe cycle, 2 s TTL |
+| the purge was triggered by the wrong map | `platformCaptions` stays small for a task whose caption was never measured, so the purge never ran while the other maps filled up | triggered by whichever map grew first |
+| the probe cache never forgot a closed window | `probed` grew for the life of the process | pruned against the live bars |
+| two dead files at the root | `appveyor.yml` (no AppVeyor account here) and `mf.java` (a stray AOSP file) | deleted |
+
+### The protocol test can fail — proven
+
+Mutated on purpose: one extra field in the daemon's task line made it report *"client reads
+appLeft from p[11], daemon writes activityType there"* and exit 1. Reverting made it green.
+
+### Not done, and why
+
+`LauncherActivity` is still 7 402 lines with six jobs in it. Splitting it is right and is **not**
+safe blind: its inner classes touch a dozen fields of the activity, and nothing here can run
+the app to prove the desktop still works.
+
 ## v0.7.21 — the review's findings, fixed
 
 `/ponytail-review` and `/ponytail-audit` were run properly this time (the skill files from
