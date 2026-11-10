@@ -482,6 +482,30 @@ check("caption: the overlay does not rebuild windows to restack them",
       "frontTask" not in fallback and "void lift()" not in fallback,
       "CaptionFallback raise/lift removed")
 
+# ── 9j. stale bookkeeping, and the cost of the witness ─────────────────────
+check("bookkeeping: the purge is triggered by whichever map grew first",
+      "int widest = Math.max(platformCaptions.size()," in caption_service
+      and "if (widest > stack.size() + 4) {" in caption_service,
+      "CaptionService purge")
+
+check("bookkeeping: the probe cache forgets windows that are gone",
+      "if (probed.size() > bars.size() + 8) probed.keySet().retainAll(bars.keySet());" in fallback,
+      "CaptionFallback.probed")
+
+check("daemon: one dumpsys serves every task in a probe cycle",
+      "private static synchronized String windowDump()" in read(ROOT / "openandroiddex-wmd/src/com/ccrstech/openandroiddex/wmd/WmDaemon.java")
+      and "String dump = windowDump();" in read(ROOT / "openandroiddex-wmd/src/com/ccrstech/openandroiddex/wmd/WmDaemon.java"),
+      "WmDaemon.windowDump")
+
+check("repo: no second CI config, no stray source at the root",
+      not (ROOT / "appveyor.yml").exists() and not (ROOT / "mf.java").exists(),
+      "appveyor.yml / mf.java")
+
+check("protocol: the wire test runs in CI too",
+      "run: python3 tools/protocol-test.py" in ci
+      and (ROOT / "tools/protocol-test.py").exists(),
+      ".github/workflows/dex-x.yml")
+
 # ── 10. versions agree everywhere ───────────────────────────────────────────
 gradle = read(ROOT / "openandroiddex-launcher/app/build.gradle")
 pkg = read(ROOT / "open-android-dex-tauri/package.json")

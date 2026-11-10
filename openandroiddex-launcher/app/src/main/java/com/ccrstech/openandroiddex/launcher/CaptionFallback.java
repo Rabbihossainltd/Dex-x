@@ -245,6 +245,10 @@ final class CaptionFallback {
                 bars.remove(b.taskId);
             }
         }
+        // A closed window's probe cache is dead weight, and a reused task id must be
+        // asked about again rather than inherit what the last window with that number
+        // answered.
+        if (probed.size() > bars.size() + 8) probed.keySet().retainAll(bars.keySet());
     }
 
     /** One of our own windows that wears a bar like any app window. */

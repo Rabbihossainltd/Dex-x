@@ -924,7 +924,7 @@ public final class WmDaemon {
                     return;
                 }
                 int maxPx = Math.max(48, t.bounds.height() / 3);
-                String dump = sh("dumpsys window windows");
+                String dump = windowDump();
                 int captionPx = CaptionDump.captionHeight(dump, displayId,
                         t.bounds.left, t.bounds.top, t.bounds.right, t.pkg, maxPx);
                 out.println("OK " + captionPx);
@@ -938,7 +938,7 @@ public final class WmDaemon {
                 // app can call enumerates it, and three releases were spent guessing at it.
                 // The lines carrying a window's name, type and frame are all we need, and
                 // they are what is passed through here.
-                String dump = sh("dumpsys window windows");
+                String dump = windowDump();
                 if (dump.isEmpty()) {
                     out.println("EMPTY");
                     out.println("END");
@@ -1748,6 +1748,30 @@ public final class WmDaemon {
         }
     }
     /** Run a shell command with this process's own authority, stdout back. */
+    /** How long one dumpsys is reused, ms. It takes a few hundred on a mid-range phone. */
+    private static final long DUMP_TTL_MS = 2000L;
+    private static String dumpText;
+    private static long dumpAt;
+
+    /**
+     * {@code dumpsys window windows}, reused for {@link #DUMP_TTL_MS}.
+     *
+     * <p>The launcher asks about one task at a time, so a desktop with five windows used to
+     * run five dumpsys calls every probe cycle — each a fork of a shell, each a full walk
+     * of the window list, on a phone that is already encoding video. The dump is the same
+     * answer for every task in a cycle, so it is taken once.
+     *
+     * <p>Two seconds, not longer: the number this feeds decides how tall our title bar is
+     * drawn, and a window that gains or loses a caption must be seen by the next parse.
+     */
+    private static synchronized String windowDump() {
+        long now = SystemClock.uptimeMillis();
+        if (dumpText != null && now - dumpAt >= 0 && now - dumpAt < DUMP_TTL_MS) return dumpText;
+        dumpText = sh("dumpsys window windows");
+        dumpAt = now;
+        return dumpText;
+    }
+
     private static String sh(String cmd) {
         if (cmd == null || cmd.trim().isEmpty()) return "";
         try {

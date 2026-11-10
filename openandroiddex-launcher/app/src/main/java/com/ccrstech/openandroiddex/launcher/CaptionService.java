@@ -1442,7 +1442,14 @@ public final class CaptionService extends AccessibilityService {
         lastStack = stack;
         // Forget tasks that are gone: a reused task id must be measured again rather than
         // inherit the height of whatever wore that number before it.
-        if (platformCaptions.size() > stack.size() + 4) {
+        // Triggered by the map that grows FIRST, not by one of them: a task whose caption
+        // was never measured leaves platformCaptions small while quietPasses and
+        // barHeights fill up, and the purge then never runs. (That is a leak of a few
+        // integers per closed window — small, and exactly the kind that is never found
+        // again once it is old.)
+        int widest = Math.max(platformCaptions.size(),
+                Math.max(quietPasses.size(), Math.max(barHeights.size(), seenCaptions.size())));
+        if (widest > stack.size() + 4) {
             Set<Integer> alive = new HashSet<>();
             for (WmClient.Task t : stack) alive.add(t.taskId);
             platformCaptions.keySet().retainAll(alive);

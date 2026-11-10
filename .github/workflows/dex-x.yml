@@ -68,6 +68,9 @@ jobs:
       - name: Run the dumpsys caption parser against real-format dumps
         run: bash tools/dump-test.sh
 
+      - name: Check the phone-daemon wire for drift
+        run: python3 tools/protocol-test.py
+
       - name: Build the launcher APK
         working-directory: openandroiddex-launcher
         # Debug, not release: assembleRelease has no signingConfig and emits an
