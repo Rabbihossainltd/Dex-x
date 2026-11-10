@@ -3469,7 +3469,7 @@ public class SettingsActivity extends Activity {
                 DexPrefs.KEY_SIZE_INDEX, DexPrefs.KEY_DENSITY, DexPrefs.KEY_LANGUAGE));
 
         Dialog dialog = new Dialog(this);
-        LinearLayout panel = dialogPanel(dialog, "⚠", theme.danger,
+        LinearLayout panel = dialogPanel(dialog, Glyphs.WARNING, theme.danger,
                 s(R.string.st_factory_reset), s(R.string.st_factory_reset_sub));
 
         TextView warning = new TextView(this);
@@ -3600,11 +3600,13 @@ public class SettingsActivity extends Activity {
 
     private LinearLayout dialogPanel(Dialog dialog, String glyph, int tint,
                                      String title, String subtitle) {
-        TextView icon = new TextView(this);
-        icon.setText(glyph);
-        icon.setTextColor(tint);
-        icon.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(16));
-        icon.setGravity(Gravity.CENTER);
+        // The argument names one of Glyphs' drawn icons now — the ⚠ that used to
+        // be typed here is a pictograph, and this window already draws its own.
+        ImageView icon = new ImageView(this);
+        icon.setImageDrawable(Glyphs.of(glyph, tint));
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        int pad = dp(9);
+        icon.setPadding(pad, pad, pad, pad);
         return dialogPanel(dialog, icon, tint, title, subtitle);
     }
 

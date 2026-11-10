@@ -128,6 +128,82 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.14 — going deeper: scrcpy's own documentation, and edges that are really ours
+
+Two asks in this round: go deeper, and try another way. Both are in this build, plus the first
+**mechanical** proof this project has had that its own claims are true.
+
+### 1. The sound: we were using the wrong source all along
+
+Read scrcpy v5.0.1's `doc/audio.md` instead of trusting memory. It says, in as many words:
+
+| Source | What scrcpy does | Android floor |
+| --- | --- | --- |
+| `output` (**the default**) | "forwards the whole audio output, **and disables playback on the device**" (REMOTE_SUBMIX) | 11 |
+| `playback` | "captures the audio playback (**Android apps can opt out**, so the whole output is not necessarily captured)" | 13 for the dup path |
+| `playback --audio-dup` | keeps the sound playing on the phone **as well** | 13 |
+
+Every round until now asked for `playback`:
+
+* 0.7.12/0.7.13 passed `--audio-dup` → the phone kept the sound. That was the report.
+* 0.7.13 (after its re-read) dropped the flag but kept `playback` → the phone *probably* went
+  quiet, but every app that opts out of playback capture — most DRM video, some music apps — still
+  played out of the phone's own speaker. "Sound phone e e baje" would have survived for exactly
+  those apps.
+
+**Now the flag is simply not passed.** scrcpy's default `output` source takes the whole mix away
+from the phone and gives it to the computer, no app can opt out, and the phone's own output comes
+back when the session ends. `--audio-dup` is not passed anywhere.
+
+### 2. Resize: the window's own edges are ours now, not just the title bar
+
+The report was "the icon is on the corner but it only works inside". That was never a gesture bug —
+it was ownership. Our chrome is a `SurfaceControlViewHost` whose surface *is* the 40 dp caption
+strip, so the app's own surface below it (and its corner) answers to the app.
+
+New `EdgeResize`: three thin, invisible `TYPE_ACCESSIBILITY_OVERLAY` windows on the desktop's
+display, laid along the **front-most** window's right edge, bottom edge and bottom-right corner.
+An overlay also fixes the other half of the complaint — a touch stream belongs to the window that
+received ACTION_DOWN until ACTION_UP, so a drag that starts on a 7 dp band keeps arriving after the
+pointer is a hundred pixels away, which a 40 dp strip could not promise.
+
+Only the front-most window gets bands: an overlay sits above every app, so a band belonging to a
+window three deep would swallow clicks meant for the one on top. Bands are hidden while a window is
+maximised, frozen while a drag is in flight (the reconcile poll carries a rect a frame or two behind
+the pointer), and applied on the same newest-wins `DRAG` channel the title-bar grip uses.
+
+### 3. Every caption button is drawn
+
+◧ ◨ — ▢ ❐ ✕ on each window's title bar were TextViews holding dingbats: the stroke weight and
+optical size came from whatever font the display shipped, inside a bar whose other icons are drawn.
+They are `Glyphs` paths now, tinted through a colour-state list so the close button still goes white
+over its red. The fullscreen toggle in the tray, and the ⚠ in a Settings dialog, went the same way.
+
+The two dead navigation builders (`buildNavCluster`, `buildWin11NavCluster`) are **deleted**, not
+kept unreferenced — a builder that exists is a builder somebody will call, which is exactly how this
+view survived two rounds of "navigation bar ekhono ache".
+
+### 4. `tools/audit.py` — the claims, checked by machine
+
+`python3 tools/audit.py` reads the source (never a changelog) and asserts each promise: the pointer
+mode and its gate, no navigation cluster anywhere, the home's resizeable flag, no pictograph in any
+string, `--audio-dup` absent, `--audio-source` absent, the stored answer's `(true, false)`, the
+minimised set feeding `openPkgs`/`focusPackage`, `EdgeResize`'s overlay plumbing and its
+drag-freeze, the fallback band's offset, and that all five version files agree. **30/30 pass now**,
+and it exits non-zero the moment one stops being true — the first time in this project that a claim
+cannot quietly rot.
+
+Two of its first three failures were real code (a leftover `◁ ○ ▢` in a comment that turned out to
+be only a comment — and the caption's dingbats), and one was the check itself being too crude; the
+script is part of the repo so the next round starts from evidence.
+
+### Still open, unchanged
+
+UAC "Unknown publisher" (needs a CA certificate), Ctrl+V paste, the minimise animation, the in-APK
+QR scanner, `FLAG_SECURE` windows, and a whole-window resize *frame* on the left and top edges (the
+right, bottom and the corner are ours now). Nothing in this round was verified on a device — the
+evidence is the source, the scrcpy documentation, and the audit.
+
 ## v0.7.13 — the re-read: four things 0.7.12 claimed or missed
 
 Asked to go back over every report instead of trusting the last round. Four defects came out of it,

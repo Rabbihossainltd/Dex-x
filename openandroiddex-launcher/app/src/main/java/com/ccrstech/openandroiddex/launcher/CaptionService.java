@@ -24,6 +24,7 @@ import android.view.View;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityWindowInfo;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -532,6 +533,14 @@ public final class CaptionService extends AccessibilityService {
     /** The drag ghost and the layout picker. Built on first use — see SnapOverlay. */
     private SnapOverlay snapOverlay;
     /**
+     * The front-most window's own edges, as draggable bands — see {@link EdgeResize}.
+     *
+     * <p>This is what makes the resize work ON THE CORNER the window actually has
+     * rather than only on the grip drawn in its title bar ("kone icon dekha jai,
+     * kintu kaj kore bhitor e").
+     */
+    private EdgeResize edges;
+    /**
      * The zone the window being dragged would land in, or SnapZones.NONE.
      *
      * Held between the move that set it and the release that acts on it, so the
@@ -640,7 +649,8 @@ public final class CaptionService extends AccessibilityService {
          */
         boolean snaps;
         /** The maximise button, so its glyph can follow the window between ▢ and ❐. */
-        TextView maxBtn;
+        /** The maximise/restore control — an icon, swapped between the two. */
+        ImageView maxBtn;
         /** Whether the window fills the desktop right now — Windows draws restore-down then. */
         boolean maxed;
         /** Accessibility window this is attached to; changes when the host is recreated. */
@@ -1112,6 +1122,10 @@ public final class CaptionService extends AccessibilityService {
         for (WmClient.Task t : stack) {
             if (t.pkg != null) desktopPkgs.add(t.pkg);
         }
+        // The front-most window gets real edges to pull. One window only: an
+        // overlay is above every app, so a band belonging to a window that is
+        // behind another would swallow clicks meant for the one on top.
+        syncEdgeResize(stack.isEmpty() ? null : stack.get(0), live);
         // Every ~2 s: an app that was launched here and is now open on the PHONE
         // has to be given the phone's screen back. Cheap (one LIST on another
         // display, ~2.5 ms) and done on this poll rather than its own thread.
@@ -1618,7 +1632,7 @@ public final class CaptionService extends AccessibilityService {
         boolean maxed = isMaxed(task);
         if (maxed != c.maxed && c.maxBtn != null) {
             c.maxed = maxed;
-            c.maxBtn.setText(maxed ? "❐" : "▢");
+            setIcon(c.maxBtn, maxed ? Glyphs.RESTORE : Glyphs.MAXIMISE);
         }
 
         int width = task.right - task.left;
@@ -1775,17 +1789,25 @@ public final class CaptionService extends AccessibilityService {
         cluster.setPadding(0, 0, px(4), 0);
 
         if (wide) {
-            cluster.addView(button(ui, "◧", false, v -> onSnapLeft(task)), buttonParams(height));
-            cluster.addView(button(ui, "◨", false, v -> onSnapRight(task)), buttonParams(height));
+            cluster.addView(button(ui, Glyphs.SNAP_LEFT, false, v -> onSnapLeft(task)),
+                    buttonParams(height));
+            cluster.addView(button(ui, Glyphs.SNAP_RIGHT, false, v -> onSnapRight(task)),
+                    buttonParams(height));
         }
         c.snaps = wide;
         if (!detour) {
-            cluster.addView(button(ui, "—", false, v -> onMinimise(task)), buttonParams(height));
-            // ▢ (or ❐ when the window already fills the desktop, as Windows
-            // draws it). The click is maximise/restore; a long press is the
-            // snap-layout picker, which is the second thing the button can do
-            // rather than a replacement for the first.
-            TextView maxBtn = button(ui, c.maxed ? "❐" : "▢", false, v -> onMaximise(task));
+            cluster.addView(button(ui, Glyphs.MINIMISE, false, v -> onMinimise(task)),
+                    buttonParams(height));
+            // A square, or the two-overlapping one when the window already fills
+            // the desktop — as Windows draws it. The click is maximise/restore; a
+            // long press is the snap-layout picker, which is the second thing the
+            // button can do rather than a replacement for the first.
+            //
+            // Drawn rather than typed: ▢ and ❐ are dingbats, and a dingbat is
+            // whatever the display's font decides — three densities of stroke
+            // inside one title bar is the tell.
+            ImageView maxBtn = button(ui, c.maxed ? Glyphs.RESTORE : Glyphs.MAXIMISE, false,
+                    v -> onMaximise(task));
             c.maxBtn = maxBtn;
             maxBtn.setOnLongClickListener(v -> {
                 showLayoutPicker(task, v);
@@ -1794,7 +1816,7 @@ public final class CaptionService extends AccessibilityService {
             cluster.addView(maxBtn, buttonParams(height));
         }
         c.maxed = isMaxed(task);
-        if (c.maxBtn != null) c.maxBtn.setText(c.maxed ? "❐" : "▢");
+        if (c.maxBtn != null) setIcon(c.maxBtn, c.maxed ? Glyphs.RESTORE : Glyphs.MAXIMISE);
         // Resize, where the hand already is: a grip in the title bar that pulls
         // the bottom-right corner. The window's own corner is not reachable — our
         // surface is the strip — so the corner comes to the pointer instead.
@@ -1802,7 +1824,8 @@ public final class CaptionService extends AccessibilityService {
             cluster.addView(CaptionChrome.grip(ui, resizerFor(task), "⤡", px(13), theme.textDim, btnPx),
                     buttonParams(height));
         }
-        cluster.addView(button(ui, "✕", true, v -> onClose(task)), buttonParams(height));
+        cluster.addView(button(ui, Glyphs.CLOSE, true, v -> onClose(task)),
+                buttonParams(height));
         bar.addView(cluster, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT));
         bar.setOnTouchListener(dragHandler(c, task, bar));
@@ -1869,6 +1892,62 @@ public final class CaptionService extends AccessibilityService {
      * the listener outlives the rect it was built with, and a capture would
      * resize the window from wherever it was when the bar was first attached.
      */
+    /**
+     * Put real, draggable edges on the front-most window — or take them away.
+     *
+     * <p>Called once per reconcile tick (60–400 ms). Cheap when nothing moved:
+     * {@link EdgeResize#sync} re-places three windows only when the rect or the
+     * task changed, and returns immediately while a drag is in progress.
+     */
+    private void syncEdgeResize(WmClient.Task front, List<WmClient.Task> live) {
+        if (front == null || front.displayId != desktopDisplayId) {
+            if (edges != null) edges.hide();
+            return;
+        }
+        if (edges == null) edges = new EdgeResize(this);
+        final int display = front.displayId;
+        final int id = front.taskId;
+        edges.sync(display, id,
+                new int[]{front.left, front.top, front.right, front.bottom},
+                maxRect(display),
+                new EdgeResize.Sink() {
+                    @Override
+                    public int[] rect() {
+                        WmClient.Task t = tasks.get(id);
+                        return t == null ? null : new int[]{t.left, t.top, t.right, t.bottom};
+                    }
+
+                    @Override
+                    public int[] limits() {
+                        return maxRect(display);
+                    }
+
+                    @Override
+                    public void apply(int left, int top, int right, int bottom) {
+                        // The same write the caption's grip makes: the rect is the
+                        // window's restore target from now on, maximised is off,
+                        // and the frame goes out on the newest-wins DRAG channel
+                        // so a slow round trip can only cost a frame.
+                        final int strip = captionHeight(id);
+                        maximized.remove(id);
+                        restoreBounds.put(id, new int[]{left, top, right, bottom});
+                        WmClient.Task t = tasks.get(id);
+                        if (t != null) {
+                            t.left = left;
+                            t.top = top;
+                            t.right = right;
+                            t.bottom = bottom;
+                        }
+                        wm.drag(display, id, left, top, right, bottom, strip);
+                    }
+
+                    @Override
+                    public void byHand() {
+                        maximized.remove(id);
+                    }
+                });
+    }
+
     private CaptionChrome.Resizer resizerFor(WmClient.Task task) {
         final int id = task.taskId;
         final int display = task.displayId;
@@ -2132,33 +2211,47 @@ public final class CaptionService extends AccessibilityService {
      * this file (see build). Pressed does cross it, so the button is never
      * silent even where hover turns out not to resolve.
      */
-    private TextView button(android.content.Context ui, String glyph, boolean close,
-                            View.OnClickListener onClick) {
+    /**
+     * One caption control: a drawn icon in a frame that answers hover and press.
+     *
+     * <p>These were TextViews holding ◧ ◨ — ▢ ❐ ✕, which is a font's idea of a
+     * window button: the stroke weight, the optical size and even whether it is a
+     * tofu box all depend on what the display happens to ship. The icons are
+     * {@link Glyphs} paths now, and the tint is a colour-state list, so the close
+     * button can still go white over its red while everything else follows the
+     * wallpaper's palette.
+     */
+    private ImageView button(android.content.Context ui, String icon, boolean close,
+                             View.OnClickListener onClick) {
         DexTheme theme = DexTheme.of(this);
-        TextView b = new TextView(ui);
-        b.setText(glyph);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_PX, px(12));
-        b.setGravity(Gravity.CENTER);
-        b.setOnClickListener(onClick);
-
         boolean hot = close && theme.win11;
         int lit = hot ? 0xFFc42b1c : theme.hover;
         StateListDrawable bg = new StateListDrawable();
         bg.addState(new int[]{android.R.attr.state_pressed}, new ColorDrawable(lit));
         bg.addState(new int[]{android.R.attr.state_hovered}, new ColorDrawable(lit));
         bg.addState(new int[0], new ColorDrawable(0x00000000));
-        b.setBackground(bg);
-        b.setTextColor(hot
-                // white on the red, in both themes — the fill is the same red
-                // either way, so the ink over it cannot follow the palette
-                ? new ColorStateList(
-                        new int[][]{{android.R.attr.state_pressed},
-                                {android.R.attr.state_hovered}, {}},
-                        new int[]{0xFFffffff, 0xFFffffff, theme.textDim})
-                : ColorStateList.valueOf(theme.textDim));
 
+        ImageView b = new ImageView(ui);
+        b.setBackground(bg);
+        b.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        b.setPadding(px(5), px(5), px(5), px(5));
+        // Tinted from a white glyph, which is what a tint needs to be honest
+        // about its colour — the same trick the tray's icons use, inverted.
+        b.setImageDrawable(Glyphs.of(icon, 0xFFFFFFFF));
+        b.setImageTintList(new ColorStateList(
+                new int[][]{{android.R.attr.state_pressed},
+                        {android.R.attr.state_hovered}, {}},
+                hot ? new int[]{0xFFffffff, 0xFFffffff, theme.textDim}
+                        : new int[]{theme.textDim, theme.textDim, theme.textDim}));
+        b.setOnClickListener(onClick);
         DexCursors.apply(b, DexCursors.ROLE_HAND);
         return b;
+    }
+
+    /** Swap a control's icon (maximise ↔ restore) keeping its tint list. */
+    private void setIcon(ImageView view, String icon) {
+        if (view == null) return;
+        view.setImageDrawable(Glyphs.of(icon, 0xFFFFFFFF));
     }
 
     /**

@@ -75,6 +75,16 @@ final class Glyphs {
     static final String PALETTE = "palette";
     static final String FILE = "file";
     static final String HALF = "half";
+    static final String MINIMISE = "minimise";
+    static final String MAXIMISE = "maximise";
+    static final String RESTORE = "restore";
+    static final String CLOSE = "close";
+    static final String CHECK = "check";
+    static final String SNAP_LEFT = "snapLeft";
+    static final String SNAP_RIGHT = "snapRight";
+    static final String FULLSCREEN = "fullscreen";
+    static final String EXIT_FULLSCREEN = "exitFullscreen";
+    static final String WARNING = "warning";
     static final String LAYERS = "layers";
 
     /** A drawn icon: fixed to its 24-unit grid, sized to whatever bounds it is given. */
@@ -381,6 +391,62 @@ final class Glyphs {
                 c.drawPath(path, stroke);
                 c.drawLine(14.2f, 3.2f, 14.2f, 8f, stroke);
                 c.drawLine(14.2f, 8f, 18.6f, 8f, stroke);
+            } else if (FULLSCREEN.equals(n) || EXIT_FULLSCREEN.equals(n)) {
+                stroke.setStyle(Paint.Style.STROKE);
+                boolean out = FULLSCREEN.equals(n);
+                // Four corner brackets, pointing out (expand) or in (shrink).
+                float lo = 4.2f, in0 = 9.8f, in1 = 14.2f, hi = 19.8f;
+                if (out) {
+                    path.moveTo(lo, in0); path.lineTo(lo, lo); path.lineTo(in0, lo);
+                    path.moveTo(in1, lo); path.lineTo(hi, lo); path.lineTo(hi, in0);
+                    path.moveTo(hi, in1); path.lineTo(hi, hi); path.lineTo(in1, hi);
+                    path.moveTo(in0, hi); path.lineTo(lo, hi); path.lineTo(lo, in1);
+                } else {
+                    path.moveTo(lo, in0); path.lineTo(in0, in0); path.lineTo(in0, lo);
+                    path.moveTo(in1, lo); path.lineTo(in1, in0); path.lineTo(hi, in0);
+                    path.moveTo(hi, in1); path.lineTo(in1, in1); path.lineTo(in1, hi);
+                    path.moveTo(in0, hi); path.lineTo(in0, in1); path.lineTo(lo, in1);
+                }
+                c.drawPath(path, stroke);
+            } else if (WARNING.equals(n)) {
+                stroke.setStyle(Paint.Style.STROKE);
+                path.moveTo(12f, 3.2f); path.lineTo(21.4f, 20.2f);
+                path.lineTo(2.6f, 20.2f); path.close();
+                c.drawPath(path, stroke);
+                stroke.setStrokeWidth(2.1f);
+                c.drawLine(12f, 9f, 12f, 14.2f, stroke);
+                fill.setStyle(Paint.Style.FILL);
+                c.drawCircle(12f, 17.2f, 1.25f, fill);
+            } else if (MINIMISE.equals(n)) {
+                stroke.setStyle(Paint.Style.STROKE);
+                c.drawLine(6f, 12f, 18f, 12f, stroke);
+            } else if (MAXIMISE.equals(n)) {
+                stroke.setStyle(Paint.Style.STROKE);
+                c.drawRect(5.6f, 5.6f, 18.4f, 18.4f, stroke);
+            } else if (RESTORE.equals(n)) {
+                stroke.setStyle(Paint.Style.STROKE);
+                c.drawRect(4.6f, 8.2f, 15.4f, 19.4f, stroke);
+                path.moveTo(8.2f, 8.2f); path.lineTo(8.2f, 4.6f);
+                path.lineTo(19.4f, 4.6f); path.lineTo(19.4f, 15.4f);
+                c.drawPath(path, stroke);
+            } else if (CLOSE.equals(n)) {
+                stroke.setStyle(Paint.Style.STROKE);
+                c.drawLine(6.4f, 6.4f, 17.6f, 17.6f, stroke);
+                c.drawLine(17.6f, 6.4f, 6.4f, 17.6f, stroke);
+            } else if (CHECK.equals(n)) {
+                stroke.setStyle(Paint.Style.STROKE);
+                path.moveTo(5f, 12.6f); path.lineTo(9.8f, 17.2f); path.lineTo(19f, 6.8f);
+                c.drawPath(path, stroke);
+            } else if (SNAP_LEFT.equals(n)) {
+                fill.setStyle(Paint.Style.FILL);
+                c.drawRoundRect(new RectF(3.6f, 5.2f, 10.4f, 18.8f), 1.4f, 1.4f, fill);
+                stroke.setStyle(Paint.Style.STROKE);
+                c.drawRoundRect(new RectF(3.6f, 5.2f, 20.4f, 18.8f), 1.4f, 1.4f, stroke);
+            } else if (SNAP_RIGHT.equals(n)) {
+                fill.setStyle(Paint.Style.FILL);
+                c.drawRoundRect(new RectF(13.6f, 5.2f, 20.4f, 18.8f), 1.4f, 1.4f, fill);
+                stroke.setStyle(Paint.Style.STROKE);
+                c.drawRoundRect(new RectF(3.6f, 5.2f, 20.4f, 18.8f), 1.4f, 1.4f, stroke);
             } else if (HALF.equals(n)) {
                 stroke.setStyle(Paint.Style.STROKE);
                 c.drawCircle(12f, 12f, 8.4f, stroke);

@@ -780,7 +780,8 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     /** Tray battery pill ("⚡ 87%") — refreshed by batteryReceiver. */
     private TextView batteryPill;
     /** Tray fullscreen toggle — glyph mirrors the PC window's state. */
-    private TextView fsButton;
+    /** The PC-window fullscreen toggle — a drawn icon inside its hover frame. */
+    private View fsButton;
     private boolean pcFullscreen = false;
     /** Latest ACTION_BATTERY_CHANGED sticky intent — feeds pill + flyout. */
     private Intent lastBattery;
@@ -3875,33 +3876,6 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         return btn;
     }
 
-    /**
-     * The DeX shell's ◁ ○ ▢ cluster. KEPT UNREFERENCED, ON PURPOSE.
-     *
-     * <p>Nothing calls it: the taskbar builds no navigation cluster at all (see
-     * {@code buildTaskbar}). It stays in the file as the record of what was
-     * removed and why — a gone view that is still built is one layout pass away
-     * from being visible, which is exactly how this survived two rounds of
-     * "navigation bar ekhono ache".
-     */
-    private View buildNavCluster() {
-        LinearLayout left = new LinearLayout(this);
-        left.setOrientation(LinearLayout.HORIZONTAL);
-        left.setGravity(Gravity.CENTER_VERTICAL);
-        left.setPadding(dp(compact ? 4 : 8), 0, 0, 0);
-        LinearLayout.LayoutParams navLp = new LinearLayout.LayoutParams(
-                dp(compact ? 33 : 40), dp(compact ? 34 : 38));
-        navLp.setMargins(dp(compact ? 1 : 2), 0, dp(compact ? 1 : 2), 0);
-        // back is executed by the PC (adb key inject) via the request queue
-        left.addView(navButton("◁", getString(R.string.lx_back),
-                v -> RequestProvider.enqueue("key", "back")), navLp);
-        left.addView(navButton("○", getString(R.string.lx_home), v -> goHome()),
-                new LinearLayout.LayoutParams(navLp));
-        left.addView(navButton("▢", getString(R.string.lx_recent_apps),
-                v -> toggleRecentsPopup()), new LinearLayout.LayoutParams(navLp));
-        return left;
-    }
-
     /** Taskbar's middle cluster: the apps toggle and the open-apps strip. */
     private View buildAppsCluster() {
         LinearLayout center = new LinearLayout(this);
@@ -3949,26 +3923,19 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         center.addView(scroll, scrollLp);
         return center;
     }
-
-    /**
-     * Taskbar's left cluster in the Windows 11 shell: the Back key, alone.
-     *
-     * Windows puts nothing at that end of the bar, and its centred cluster is
-     * the whole point of the layout — but this desktop is Android underneath
-     * and Back is not a convenience, it is how half the apps on it are
-     * dismissed. Anchored where it cannot push the centred cluster off centre.
-     */
-    /** The Windows shell's single ◁ — unreferenced, as {@link #buildNavCluster} is. */
-    private View buildWin11NavCluster() {
-        LinearLayout left = new LinearLayout(this);
-        left.setOrientation(LinearLayout.HORIZONTAL);
-        left.setGravity(Gravity.CENTER_VERTICAL);
-        left.setPadding(dp(compact ? 4 : 8), 0, 0, 0);
-        // executed by the PC (adb key inject) via the request queue
-        left.addView(win11BarButton(barGlyph(Glyphs.BACK), getString(R.string.lx_back),
-                v -> RequestProvider.enqueue("key", "back")));
-        return left;
-    }
+    // ── the navigation cluster: DELETED, on the third report ────────────────
+    //
+    // Two builders stood here — buildNavCluster() (back · home · open apps) and
+    // buildWin11NavCluster() (the single back key the Windows shell kept) — and
+    // both were unreferenced once 0.7.12 stopped building either. They are
+    // deleted rather than kept "for the record", because a builder that exists
+    // is a builder somebody will call: this exact view survived two rounds of
+    // "navigation bar ekhono ache" by being constructed and then hidden.
+    //
+    // What replaced them: nothing, and that is the answer. Back lives in the
+    // quick panel, Home is the phone's own gesture (the desktop never closes),
+    // and the open apps are the taskbar's own strip — which is all a task view
+    // button was offering to show.
 
     /**
      * Taskbar's centre in the Windows 11 shell: Start · Search · Task view ·
@@ -4159,7 +4126,8 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
 
         // PC-window fullscreen toggle; executed by the PC via the request
         // queue, icon confirmed by the running broadcast's "fs" extra
-        fsButton = navButton("⛶", getString(R.string.lx_fullscreen), v -> {
+        fsButton = win11BarButton(glyphIcon(Glyphs.FULLSCREEN, 19f, theme.textDim),
+                getString(R.string.lx_fullscreen), v -> {
             RequestProvider.enqueue("fullscreen", "toggle");
             setPcFullscreen(!pcFullscreen); // optimistic — broadcast re-syncs
         });
@@ -4715,7 +4683,14 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     private void setPcFullscreen(boolean on) {
         pcFullscreen = on;
         if (fsButton != null) {
-            fsButton.setText(on ? "❐" : "⛶");
+            // The button is a drawn icon now, so "fullscreen" changes the
+            // picture rather than a character in a TextView.
+            View content = fsButton instanceof FrameLayout
+                    ? ((FrameLayout) fsButton).getChildAt(0) : fsButton;
+            if (content instanceof ImageView) {
+                ((ImageView) content).setImageDrawable(Glyphs.of(
+                        on ? Glyphs.EXIT_FULLSCREEN : Glyphs.FULLSCREEN, theme.textDim));
+            }
             fsButton.setContentDescription(getString(
                     on ? R.string.lx_exit_fullscreen : R.string.lx_fullscreen));
         }

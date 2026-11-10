@@ -265,9 +265,9 @@ fn build_args(opts: &MirrorOptions) -> Vec<String> {
         args.push("--no-video".into());
         args.push("--no-window".into());
         args.push("--no-control".into());
-        if opts.audio_playback {
-            args.push("--audio-source=playback".into());
-        }
+        // No `--audio-source` at all — see the long note in the video path
+        // below. scrcpy's default source is `output`, which is the one that
+        // takes the sound AWAY from the phone.
         return args;
     }
     if opts.max_size > 0 {
@@ -282,15 +282,32 @@ fn build_args(opts: &MirrorOptions) -> Vec<String> {
     if !opts.audio {
         args.push("--no-audio".into());
     } else if opts.audio_playback {
-        // Playback capture with NO `--audio-dup`: the sound MOVES to this
-        // computer and the phone goes quiet for the life of the session.
+        // NOTHING. And that is the whole fix — twice over.
         //
-        // `--audio-dup` is the opposite of the request. It means "keep playing
-        // it on the phone as well" — which is why three rounds of reports came
-        // back saying the phone still had the sound while the computer was
-        // playing it too. The Android floor for a move is 11; 13 is only
-        // needed for the duplicate we are not asking for.
-        args.push("--audio-source=playback".into());
+        // scrcpy has two ways to get a phone's sound (doc/audio.md, v5.0.1):
+        //
+        //   output   (the DEFAULT) — "forwards the whole audio output, and
+        //            disables playback on the device". REMOTE_SUBMIX. Android 11+.
+        //            No app can opt out of it.
+        //
+        //   playback — "captures the audio playback (Android apps can opt out...)"
+        //            — a COPY, and with `--audio-dup` the phone keeps playing.
+        //
+        // Every round before this one asked for `playback`: 0.7.12/0.7.13 with
+        // `--audio-dup` (phone keeps the sound — the report), and this round
+        // before the re-read without it (phone probably quiet, but every app
+        // that opts out of playback capture still played out of the phone's own
+        // speaker — "sound phone e e baje" for exactly those apps).
+        //
+        // The default source is the one that matches what was asked for:
+        // the sound MOVES to the computer and the phone is silent, for the whole
+        // mix, for every app. So the flag is simply not passed.
+        //
+        // (`--audio-dup` is never passed either: it means "keep playing it on the
+        // phone as well", which is the opposite of the requirement.)
+        //
+        // The Android floor is 11 — `start_mirror` has already dropped audio on
+        // anything older, because a session that asks past it does not start.
     }
     if opts.stay_awake {
         args.push("--stay-awake".into());
@@ -2062,10 +2079,10 @@ fn session_liveness(app: &AppHandle, key: &str) -> Option<(bool, u32, String)> {
 /// the app being captured must permit it, and a second capture on the same
 /// device can be refused outright. None of those refusals reaches this side as
 /// an error — they are a scrcpy process that exits about a second after it
-/// starts. So: wait, look, and if it is gone, come back on the other path
-/// (`--audio-source=playback` without duplication, the shape every Android 11+
-/// phone supports), which at worst moves the sound to the computer instead of
-/// copying it. If that fails too, say so where a person can see it.
+/// starts. So: wait, look, and if it is gone, say so where a person can see it
+/// (`watch_audio_companion` reports through the window's note line). The desktop
+/// session's own sound is unaffected: it uses scrcpy's default `output` source,
+/// which does not depend on any app permitting a capture.
 fn watch_audio_companion(app: &AppHandle, serial: &str, pid: u32) {
     let app = app.clone();
     let serial = serial.to_string();
@@ -4779,9 +4796,10 @@ pub fn start_mirror(app: AppHandle, mut options: MirrorOptions) -> Result<Sessio
     // session: scrcpy exits on its own command line, half a second in, with the
     // reason in a log nobody reads.
     //
-    // The desktop now carries its OWN sound (`--audio-source=playback` on the
-    // video session, no `--audio-dup`: the sound moves here, it does not play
-    // in both places). It used to be a separate `--no-video`
+    // The desktop now carries its OWN sound — scrcpy's default `output` source
+    // on the video session, so the phone's whole mix moves here and the phone
+    // falls silent, with no `--audio-dup` to give it back. It used to be a
+    // separate `--no-video`
     // companion — a second process that could die a second after starting, and
     // whose only trace was a line in the log: "there is no sound on the
     // computer", with nothing to see anywhere. A session cannot silently miss
@@ -4884,8 +4902,8 @@ pub fn start_mirror(app: AppHandle, mut options: MirrorOptions) -> Result<Sessio
             )
         });
 
-    // No companion for a desktop: its sound is on the very session above
-    // (`--audio-source=playback`, no duplicate). One owner, and it is the
+    // No companion for a desktop: its sound is on the very session above (the
+    // default `output` source, nothing to duplicate). One owner, and it is the
     // process the user is already watching.
 
     let info = SessionInfo {
@@ -5628,12 +5646,20 @@ mod tests {
         opts.audio = true;
         opts.audio_playback = true;
         let args = build_args(&opts);
-        assert!(args.iter().any(|a| a == "--audio-source=playback"));
+        // The default source (`output`) is the one that SILENCES the phone and
+        // forwards the whole mix; naming `playback` instead gives a copy that
+        // apps may opt out of, and `--audio-dup` gives the phone its sound back.
+        assert!(!args.iter().any(|a| a.starts_with("--audio-source")));
         assert!(!args.iter().any(|a| a == "--audio-dup"));
+        assert!(!args.iter().any(|a| a == "--no-audio"));
         // …and the companion too, which has no window of its own.
         let companion = build_args(&audio_companion_options("X", true));
-        assert!(companion.iter().any(|a| a == "--audio-source=playback"));
+        assert!(!companion.iter().any(|a| a.starts_with("--audio-source")));
         assert!(!companion.iter().any(|a| a == "--audio-dup"));
+        // A session with audio switched off still says so explicitly.
+        opts.audio = false;
+        let muted = build_args(&opts);
+        assert!(muted.iter().any(|a| a == "--no-audio"));
     }
 
     /// The companion runs with --no-control, and scrcpy refuses to start with
