@@ -95,6 +95,85 @@ final class CaptionFallback {
         return f != null && f.bars.containsKey(taskId);
     }
 
+    // ── windows THIS renderer hid ──────────────────────────────────────────
+    //
+    // With the accessibility service off — the normal state for a sideloaded app on
+    // Android 13+ until "Allow restricted settings" is granted — THIS is the renderer
+    // that draws the title bars, so this is the one whose "—" hides a window. And
+    // hiding it here told nobody: CaptionService.openPkgs() answers empty with no
+    // service, publishMinimised() never runs, and the PC's broadcast is built from
+    // visibility, so the window was in none of the three lists the taskbar merges.
+    // The tile vanished the moment it was minimised and the window could not be
+    // reached again by anything on screen — the "recent app hide hoye jai" report,
+    // in the one configuration most installs actually run.
+    //
+    // So the hider records what it hid, and the taskbar asks it.
+
+    /** One window we hid: what it was, and whether the daemon still has it. */
+    private static final class Hid {
+        final String pkg;
+        final int display;
+        long goneSince;                        // first pass it was missing, 0 = present
+        long askedAt;                          // last time the daemon was asked
+
+        Hid(String pkg, int display) {
+            this.pkg = pkg;
+            this.display = display;
+        }
+    }
+
+    private final Map<Integer, Hid> hidden = new ConcurrentHashMap<>();
+    private static final java.util.List<Runnable> watchers = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    /** Told when the hidden set changes, so the taskbar can rebuild its row. */
+    static void watch(Runnable r) {
+        if (r != null && !watchers.contains(r)) watchers.add(r);
+    }
+
+    static void unwatch(Runnable r) {
+        watchers.remove(r);
+    }
+
+    private static void notifyWatchers() {
+        for (Runnable r : watchers) {
+            try {
+                r.run();
+            } catch (RuntimeException e) {
+                DexLog.warn("caption", "a hidden-window watcher failed: " + e);
+            }
+        }
+    }
+
+    /** Packages with a window we hid that is still open — for the taskbar. */
+    static java.util.Set<String> hiddenPackages() {
+        CaptionFallback f = instance;
+        if (f == null || f.hidden.isEmpty()) return java.util.Collections.emptySet();
+        java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
+        for (Hid h : f.hidden.values()) if (h.pkg != null && !h.pkg.isEmpty()) out.add(h.pkg);
+        return out;
+    }
+
+    /**
+     * Un-hide {@code pkg}'s window — what a click on its taskbar tile means.
+     *
+     * @return false when this renderer is not holding a hidden window of that package,
+     *         and the caller should do whatever it would have done anyway.
+     */
+    static boolean restore(String pkg) {
+        final CaptionFallback f = instance;
+        if (f == null || pkg == null) return false;
+        for (Map.Entry<Integer, Hid> e : f.hidden.entrySet()) {
+            if (!pkg.equals(e.getValue().pkg)) continue;
+            final int id = e.getKey();
+            final int display = e.getValue().display;
+            f.hidden.remove(id);
+            f.worker.post(() -> f.wm.show(display, id));
+            notifyWatchers();
+            return true;
+        }
+        return false;
+    }
+
     // ── state ─────────────────────────────────────────────────────────────
 
     private final Context app;
@@ -105,6 +184,9 @@ final class CaptionFallback {
     private final Handler worker;
     private volatile boolean running;
     private int display = -1;
+    /** How long a hidden task may be missing before the daemon is asked if it is gone. */
+    private static final long GRACE_FORGET_MS = 2_500L;
+
     /** How long a daemon caption probe is trusted, ms. A dumpsys is not free. */
     private static final long PROBE_TTL_MS = 4000L;
     /** Per task: {caption px, uptime of the probe} — see seenCaption(). */
@@ -250,6 +332,43 @@ final class CaptionFallback {
         // answered. Against every live task — NOT against `bars` (see ProbeCache).
         if (ProbeCache.shouldSweep(probed.size(), showing.size())) {
             ProbeCache.sweep(probed, idsOf(tasks));
+        }
+
+        // The windows WE hid: a task that is visible again came back on its own (or
+        // something else un-hid it), and a task the daemon no longer has is closed.
+        // Anything else stays, which is what keeps its tile on the taskbar.
+        //
+        // "Not in this list" is NOT "closed": a hidden task drops out of the root list
+        // on several phones, which is exactly the reading that used to make a
+        // minimised tile disappear. So the first miss only starts a clock, and the
+        // daemon is asked — once, not once per pass — whether the task still exists.
+        if (!hidden.isEmpty()) {
+            boolean changed = false;
+            long now = SystemClock.uptimeMillis();
+            for (Map.Entry<Integer, Hid> e : new ArrayList<>(hidden.entrySet())) {
+                WmClient.Task t = null;
+                for (WmClient.Task c : tasks) if (c.taskId == e.getKey()) { t = c; break; }
+                Hid h = e.getValue();
+                if (t == null) {
+                    if (h.goneSince == 0) h.goneSince = now;
+                    else if (now - h.goneSince > GRACE_FORGET_MS && now - h.askedAt > GRACE_FORGET_MS) {
+                        h.askedAt = now;
+                        Boolean alive = wm.has(e.getKey());
+                        if (Boolean.FALSE.equals(alive)) {
+                            hidden.remove(e.getKey());
+                            DexLog.step("caption", "fallback: task " + e.getKey() + " ("
+                                    + h.pkg + ") was closed while minimised");
+                            changed = true;
+                        }
+                    }
+                } else if (t.visible) {
+                    hidden.remove(e.getKey());     // it is back on screen
+                    changed = true;
+                } else {
+                    h.goneSince = 0;               // hidden, and still there
+                }
+            }
+            if (changed) notifyWatchers();
         }
     }
 
@@ -438,8 +557,15 @@ final class CaptionFallback {
 
     private void minimise(int taskId) {
         worker.post(() -> {
-            wm.hide(display, taskId);
             Bar b = bars.remove(taskId);
+            // Recorded BEFORE the hide, and from the bar: once the window is hidden
+            // the task list may stop carrying it (see CaptionService's identical
+            // note), so the package has to be captured while it is still known here.
+            if (b != null) {
+                hidden.put(taskId, new Hid(b.pkg, display));
+                notifyWatchers();
+            }
+            wm.hide(display, taskId);
             if (b != null) remove(b);
         });
     }
@@ -449,6 +575,7 @@ final class CaptionFallback {
             wm.close(taskId);
             Bar b = bars.remove(taskId);
             if (b != null) remove(b);
+            if (hidden.remove(taskId) != null) notifyWatchers();
         });
     }
 

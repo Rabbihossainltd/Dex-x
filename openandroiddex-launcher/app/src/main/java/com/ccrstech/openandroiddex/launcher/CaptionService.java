@@ -1376,12 +1376,12 @@ public final class CaptionService extends AccessibilityService {
 
     private boolean applyTasks(int display, List<WmClient.Task> live) {
         trackDensity(display);
-        // Before anything is measured or dressed: the platform's own caption must be off
-        // this display. It draws a title bar for the home (the "home e ekhono caption bar"
-        // report) and insets every app's content by a caption of its own, on top of the
-        // strip this service reserves — two insets, one window: the app's content sits a
-        // caption lower than it should and its bottom edge stops short of its frame,
-        // which is the black band under it. See WmDaemon's DECORS.
+        // The platform's SYSTEM bars (status, navigation) off this display. Not its
+        // caption: IWindowManager#setShouldShowSystemDecors cannot remove one, and the
+        // daemon's own DECORS comment retracts the 0.7.16 claim that it could. A caption
+        // on a task is a window decoration, and the only thing that removes it is there
+        // being no caption to draw — which is what pinHome does, by keeping the home
+        // fullscreen. This call is for the bars, and leaves it at that.
         ensurePlatformCaptionsOff(display);
         // The desktop's own launcher must never be a window — see pinHome. Every
         // pass, because the whole start is a race and a freeform home is what the

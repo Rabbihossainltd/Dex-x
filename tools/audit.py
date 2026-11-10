@@ -541,6 +541,32 @@ check("protocol: the wire test runs in CI too",
       and (ROOT / "tools/protocol-test.py").exists(),
       ".github/workflows/dex-x.yml")
 
+# ── the taskbar ─────────────────────────────────────────────────────────────
+# Two ways a tile went wrong, both found by reading rather than running: our own
+# windows drew twice, and a window minimised by the fallback renderer vanished.
+
+check("taskbar: our own package is not drawn by the running-apps loop",
+      "if (getPackageName().equals(pkg)) continue;" in launcher("LauncherActivity.java"),
+      "resolveOpenPackage() resolves our own package, so the loop drew a second tile")
+
+check("taskbar: a window the fallback minimised keeps its tile",
+      "next.addAll(CaptionFallback.hiddenPackages());" in launcher("LauncherActivity.java")
+      and "static java.util.Set<String> hiddenPackages()" in fallback
+      and "hidden.put(taskId, new Hid(b.pkg, display));" in fallback,
+      "with the service off nothing else records a hidden window")
+
+check("taskbar: clicking that tile un-hides the window rather than relaunching",
+      "if (CaptionFallback.restore(pkg)) return;" in launcher("LauncherActivity.java")
+      and "static boolean restore(String pkg)" in fallback, "CaptionFallback.restore")
+
+check("home: the base task is never dressed, whatever its package reads",
+      "if (t.taskId == baseId && (t.pkg == null || t.pkg.isEmpty()))" in caption_service
+      or "isDesktopTask(t)) continue;" in caption_service, "applyTasks skip chain")
+
+check("home: a freeform home is made fullscreen, and replaced if it will not be",
+      "private void pinHome(" in caption_service and "wm.unfloat(display, t.taskId" in caption_service
+      and "wm.home(display)" in caption_service, "pinHome")
+
 check("resources: every string in values/ is read by something",
       not dead_strings,
       f"{len(dead_strings)} unread: " + ", ".join(dead_strings[:6]))

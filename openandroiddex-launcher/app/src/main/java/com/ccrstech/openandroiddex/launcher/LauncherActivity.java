@@ -948,6 +948,9 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
             // this broadcast has lost it. Without this the strip drops a tile for good
             // and the only way back is to relaunch the app.
             next.addAll(CaptionService.openPkgs());
+            // …and so is one this launcher's OWN renderer hid, when the accessibility
+            // service is off and CaptionService therefore knows nothing about it.
+            next.addAll(CaptionFallback.hiddenPackages());
             // keep icon order stable: surviving entries keep their slot,
             // newly opened apps append on the right
             LinkedHashSet<String> merged = new LinkedHashSet<>();
@@ -1066,6 +1069,8 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
 
     /** Our own windows opened or closed — rebuild their taskbar tiles. */
     private final OwnWindows.Listener ownWindowsListener = this::refreshOpenApps;
+    /** The same rebuild, for the fallback renderer's hidden set — which is a Runnable. */
+    private final Runnable fallbackHiddenWatcher = this::refreshOpenApps;
 
     /** Packages CaptionService has minimised — open, but deliberately not visible. */
     private final LinkedHashSet<String> minimisedPkgs = new LinkedHashSet<>();
@@ -1363,6 +1368,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         // in this very process. Registering REPLACES any earlier listener, so a
         // density-driven relaunch of the desktop cannot leave a dead one behind.
         OwnWindows.setListener(ownWindowsListener);
+        CaptionFallback.watch(fallbackHiddenWatcher);
         // Same again for the notification listener: it is a service in this
         // very process, so it reports directly rather than over a broadcast.
         // Registered whether or not the grant is in place — the service binds
@@ -1612,6 +1618,7 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         } catch (Exception ignored) {
         }
         OwnWindows.clearListener(ownWindowsListener);
+        CaptionFallback.unwatch(fallbackHiddenWatcher);
         DexNotifications.clearListener(notificationListener);
         // The call banner is an overlay window, so — like the taskbar and the
         // transfer card — it outlives this activity unless it is taken down
@@ -6440,12 +6447,19 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     private void refreshOpenApps() {
         if (openAppsRow == null) return;
         openAppsRow.removeAllViews();
-        // Our own windows (Settings, Linux) never resolve to an AppEntry —
-        // loadApps() skips our package — so the loop below drops them. Add them
-        // by hand, or an open Linux window would have no taskbar presence at
-        // all and a minimised one no way back.
+        // Our own windows (Settings, Task Manager, File Transfer) are drawn by
+        // addOwnWindowTiles, one tile per ACTIVITY, because two of them share our
+        // package and a package-level tile cannot say which one a click means.
+        //
+        // The loop below must therefore skip our package outright. It used to rely on
+        // loadApps() skipping us — but findByPackage() returning null only falls through
+        // to resolveOpenPackage(), which resolves ANY installed package including this
+        // one. So every time one of our own windows was open, on top of its own tile the
+        // taskbar also drew a generic app tile for the launcher itself, and clicking that
+        // brought the desktop forward instead of the window.
         addOwnWindowTiles();
         for (String pkg : runningPkgs) {
+            if (getPackageName().equals(pkg)) continue;
             AppEntry entry = findByPackage(pkg);
             if (entry == null) entry = resolveOpenPackage(pkg);
             if (entry == null) continue;
@@ -6457,6 +6471,11 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
             LinearLayout item = taskbarTile(icon);
 
             item.setOnClickListener(v -> {
+                // A window the FALLBACK renderer hid is still open, and `launch` would
+                // start the app again rather than un-hide the window it already has —
+                // which is how a tile stayed on the bar while the thing it named was
+                // unreachable. Un-hide first, for that renderer's own record.
+                if (CaptionFallback.restore(pkg)) return;
                 // An app the drawer does not list (no launcher activity — started
                 // from a notification, a widget or another app) has nothing to
                 // launch. Its window is already on the display, so the click is a

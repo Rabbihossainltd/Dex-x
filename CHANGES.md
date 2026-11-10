@@ -128,6 +128,66 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.24 — the two questions, answered by reading the code (and two bugs in the answer)
+
+Asked to check whether the desktop home wears a caption bar, and whether a recently opened
+app stays on the taskbar. Both paths are right — and reading them turned up two places where
+the taskbar row was wrong.
+
+### The home: three defences, and none of them draws a bar there
+
+1. **Never start it in a window.** The desktop display is created FREEFORM, so a launch with
+   no windowing mode lands the home in a freeform task wearing the platform's ▢ ✕. The
+   daemon's `HOME` verb pins `--windowingMode 1` for exactly this reason.
+2. **If it is a window anyway, take it out.** `CaptionService.pinHome()` acts on the task
+   list every pass: UNFLOAT on the base task or on our own launcher activity, up to three
+   tries; after that the task is closed and the home started again through `HOME`, because a
+   task that has been through `prepare_desktop` keeps the mode it was made with.
+3. **Neither renderer ever decorates it.** `CaptionService` skips `isDesktopTask` and the
+   display's base task; `CaptionFallback` excludes the base task from `showing` before any
+   decision and skips our package unless the activity is one of the three that really are
+   windows.
+
+`ensurePlatformCaptionsOff()` is about the status and navigation bars, **not** the caption —
+the comment above that call still claimed otherwise, contradicting the method's own javadoc
+and the daemon's retraction of the same claim. Corrected.
+
+### The taskbar: a window we hid ourselves vanished
+
+With the accessibility service off — the normal state for a sideloaded app on Android 13+
+until "Allow restricted settings" is granted — `CaptionFallback` draws the title bars, so it
+is the renderer whose "—" hides a window. And it told nobody: `CaptionService.openPkgs()`
+answers empty with no service, `publishMinimised()` never runs, and the PC's broadcast is
+built from visibility. The window was in none of the three lists the taskbar merges, so its
+tile disappeared the moment it was minimised and nothing on screen could bring it back.
+
+Now the hider records what it hid (`hidden`, task id → package), the taskbar merges it, a tile
+click calls `CaptionFallback.restore()` to un-hide rather than relaunch, and the set is
+reconciled each pass: visible again = back; missing and the daemon says the task is gone =
+closed. Missing on its own is still not "closed" — a hidden task drops out of the root list on
+several phones, which is the reading that caused this in the first place.
+
+### The taskbar: our own windows drew twice
+
+`refreshOpenApps()` draws our own windows by hand, one tile per **activity**, because two of
+them share our package. The loop that follows was supposed to skip our package, and its
+comment said it did, "because loadApps() skips us". That is only half of it: `findByPackage()`
+returning null falls through to `resolveOpenPackage()`, which resolves *any* installed package
+— ours included. So every time Settings was open, the bar showed its tile and a second,
+generic Dex-X tile besides, and clicking the second one brought the desktop forward.
+
+### Not changed, and why
+
+`CaptionService` skipping a base task with a *readable* foreign package was considered and
+left alone. Such a task is the platform's own home mid-fallback, `sweepForeignHome()` closes
+it, and the alternative rule — "never dress the base task, whatever it is" — would leave a
+genuinely bottom-most app window with no title bar at all when the home is missing, which is
+the black-band-and-no-buttons report this project spent two releases on.
+
+Suites: audit **83/83**, rule **32/32**, probe cache **11/11**, dump **9/9**, protocol **6/6**.
+Five new audit checks pin the taskbar and home behaviour, and two were proven to fail by
+putting the bugs back.
+
 ## v0.7.23 — re-verified 0.7.22, found a bug in one of its own fixes, and cut 182 KB
 
 The user asked for the audit again. Checking it by a different method — reading the diff
