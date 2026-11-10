@@ -408,18 +408,14 @@ public final class WmDaemon {
                 // "DECORS <displayId> <0|1>" — allow or refuse the platform's own window
                 // decorations (its caption) on a display; answers with what it WAS.
                 //
-                // This is the layer every previous attempt at "the home has a caption"
-                // and "the app sits too high with black below" missed. The desktop
-                // display runs DesktopModeWindowDecorViewModel, which draws a caption
-                // for every task on it — the home's included — and publishes a caption
-                // inset of its own. Our own caption is drawn on top of it, and our strip
-                // insets the app a second time, so an app's content ends up a whole
-                // caption taller than the window in total: the top of it under two bars
-                // and its bottom edge short of its frame, which is the black band.
-                // The virtual display is created without
-                // SHOULD_SHOW_SYSTEM_DECORATIONS (scrcpy --no-vd-system-decorations),
-                // which this phone's decoration model ignores; this switch is the one
-                // that is honoured, and uid 2000 holds INTERNAL_SYSTEM_WINDOW for it.
+                // AOSP's IWindowManager#setShouldShowSystemDecors is about SYSTEM
+                // decorations — "status bar, navigation bar, launcher" — and NOT about a
+                // window's caption. 0.7.16 claimed it removed the caption on the home;
+                // it does not, and that claim is corrected here rather than quietly kept.
+                // What it does buy is a desktop display with no status bar and no
+                // navigation bar of the platform's on it, which is worth having on a
+                // display this process is responsible for making look like a desktop.
+                // uid 2000 holds INTERNAL_SYSTEM_WINDOW, which the call requires.
                 int d = a.length > 1 ? i(a, 1) : displayFromDump(LAUNCHER);
                 if (d < 0) {
                     out.println("ERR no desktop display");

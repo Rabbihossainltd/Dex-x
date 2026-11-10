@@ -128,6 +128,59 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.17 — whose caption is it, and the two holes that let the home wear one
+
+Two reports, and one of them is a correction of this project's own last release.
+
+### 0. 0.7.16 was wrong about `setShouldShowSystemDecors`, and says so
+
+AOSP's `IWindowManager#setShouldShowSystemDecors` is documented as "system decors include
+**status bar, navigation bar, launcher**". It is the switch for the BARS — not for a task's
+caption. 0.7.16 shipped it as the fix for "the home still has a caption" and it could not
+have worked; the code and the daemon's comment are corrected here rather than left claiming
+something the framework does not do. The call is kept (a desktop display with no status or
+navigation bar of the platform's is worth having) with an honest comment.
+
+### 1. "Home still has a caption bar with close and maximise"
+
+Two independent holes, and either one alone puts a title bar on the home:
+
+* **`isDesktopTask` matched on the package, and the package can be empty.** It comes from
+  the task's `topActivity`, which is **NULL** while a task is showing its starting window
+  and for a task whose activity has gone but whose task has not. `getPackageName().equals("")`
+  is false, so the home stopped being "the desktop" and this service dressed it like an app:
+  minimise / restore / close, ours, over the platform's own strip.
+  The bottom-most ROOT task of the desktop display is the home whatever the task list says
+  about it — apps open above it, in freeform — so that task is now never dressed, package
+  or no package.
+* **The platform will not always take the home out of freeform.** `pinHome` asks
+  (`UNFLOAT` → `setWindowingMode`, Android 12+); when the release refuses, asking again
+  every four seconds for the whole session changed nothing. After three passes the task is
+  now **replaced**: closed, and the home started again through the daemon's `HOME`, which
+  passes `--windowingMode 1` — a task that is fullscreen by construction has no caption to
+  draw. One flicker, once, rather than a title bar nothing in this process can remove.
+
+### 2. "The task manager still does not list a minimised app"
+
+The taskbar got this in 0.7.16; the Task Manager did not. Its app list is built from the
+PC's running broadcast, which is built from VISIBILITY — a minimised window is invisible and
+leaves it. It now lists `CaptionService.openPkgs()` (the in-process answer the taskbar uses,
+which carries the minimised set) and re-checks that set on its two-second tick, so a window
+minimised while this screen is open appears without waiting for a broadcast.
+
+### 3. A report that can name the owner of a caption
+
+Connect → Diagnostics now also prints every accessibility window on the desktop display:
+type, layer, active, title, bounds. That answers the one question a screenshot cannot —
+whether the strip over the home is OURS (a window of the caption service), the platform's
+window decoration (a TYPE_APPLICATION window at the task's origin), or something else.
+The report is written to `Downloads/Dex-X-diagnostics.txt` (0.7.16).
+
+### Checks
+
+`python3 tools/audit.py` — **46/46**, four new: the base-task rule, the replace-not-ask
+escalation, the Task Manager's open set, and the windows dump.
+
 ## v0.7.16 — the platform's own caption, a minimised window that came back, and the first animation
 
 Five reports. The first three are one cause each, and the third one had never been named

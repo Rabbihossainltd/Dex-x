@@ -106,6 +106,11 @@ public class TaskManagerActivity extends Activity {
         @Override
         public void run() {
             updateGauges();
+            // A window minimised or restored while this screen is open changes nothing
+            // that arrives as a broadcast HERE (the launcher's activity hears it, this
+            // one does not), so the list it draws is re-checked on the same tick as the
+            // gauges — cheaply, and only redrawn when the set actually changed.
+            if (!openPackages().equals(shownPkgs)) rebuildAppList();
             refreshCostAsync();
             main.postDelayed(this, POLL_MS);
         }
@@ -120,9 +125,10 @@ public class TaskManagerActivity extends Activity {
      * to a bounded reply instead of a thousand lines.
      */
     private void refreshCostAsync() {
-        if (running.isEmpty()) return;
+        final LinkedHashSet<String> open = openPackages();
+        if (open.isEmpty()) return;
         if (!costBusy.compareAndSet(false, true)) return;
-        final java.util.List<String> want = new java.util.ArrayList<>(running);
+        final java.util.List<String> want = new java.util.ArrayList<>(open);
         new Thread(() -> {
             try {
                 if (wm == null) wm = new WmClient();
@@ -362,9 +368,14 @@ public class TaskManagerActivity extends Activity {
         }
     }
 
+    /** What the last rebuild listed, so a change can be noticed without redrawing. */
+    private final LinkedHashSet<String> shownPkgs = new LinkedHashSet<>();
+
     private void rebuildAppList() {
         if (appList == null) return;
         appList.removeAllViews();
+        shownPkgs.clear();
+        shownPkgs.addAll(openPackages());
         int shown = ownRows() + otherRows();
         // The rows are built here, after onCreate's one pass over the tree, and
         // again on every refresh — so the pointers are re-applied with them.
@@ -408,11 +419,28 @@ public class TaskManagerActivity extends Activity {
         return shown;
     }
 
+    /**
+     * Every package open on the desktop display — including the minimised ones.
+     *
+     * <p>`running` alone is the PC's broadcast, and that is built from VISIBILITY: a
+     * window minimised with setHidden is not visible, so it leaves the list the moment it
+     * is put away and this screen said the app was gone. {@link CaptionService#openPkgs}
+     * is the in-process answer — the same one the taskbar uses — and it carries the
+     * minimised set. ("task manager a recent app ekhono thake na".)
+     */
+    private LinkedHashSet<String> openPackages() {
+        LinkedHashSet<String> all = new LinkedHashSet<>(running);
+        for (String p : CaptionService.openPkgs()) {
+            if (p != null && !p.isEmpty()) all.add(p);
+        }
+        return all;
+    }
+
     private int otherRows() {
         PackageManager pm = getPackageManager();
         costViews.clear();
         int shown = 0;
-        for (String pkg : running) {
+        for (String pkg : openPackages()) {
             if (getPackageName().equals(pkg)) continue; // ours are listed above
             CharSequence label = pkg;
             Drawable icon = null;

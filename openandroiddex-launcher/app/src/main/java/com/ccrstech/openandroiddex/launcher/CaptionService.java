@@ -190,6 +190,48 @@ public final class CaptionService extends AccessibilityService {
         return false;
     }
 
+    /**
+     * The accessibility windows on a display, one per line — for Diagnostics.
+     *
+     * The one question a screenshot cannot answer about "the home still has a caption" is
+     * WHOSE caption it is: ours (a window of this service), the platform's window
+     * decoration (a TYPE_APPLICATION window at the task's origin, taskId -1, a caption
+     * tall), or a leftover that belongs to nothing. This prints what is actually there.
+     */
+    static String describeWindows(int display) {
+        CaptionService s = live;
+        if (s == null) return "  (the caption service is not running)\n";
+        java.util.List<AccessibilityWindowInfo> ws = s.windowsOn(display);
+        if (ws == null) return "  (no accessibility windows reported for this display)\n";
+        StringBuilder b = new StringBuilder();
+        android.graphics.Rect r = new android.graphics.Rect();
+        for (AccessibilityWindowInfo w : ws) {
+            w.getBoundsInScreen(r);
+            b.append("  win id=").append(w.getId())
+                    .append(" type=").append(typeName(w.getType()))
+                    .append(" layer=").append(w.getLayer())
+                    .append(" active=").append(w.isActive() ? 1 : 0)
+                    .append(" ").append(r.left).append(',').append(r.top)
+                    .append(' ').append(r.width()).append('x').append(r.height());
+            CharSequence t = w.getTitle();
+            if (t != null && t.length() > 0) b.append(" \"").append(t).append('"');
+            b.append('\n');
+        }
+        return b.toString();
+    }
+
+    private static String typeName(int type) {
+        switch (type) {
+            case AccessibilityWindowInfo.TYPE_APPLICATION: return "application";
+            case AccessibilityWindowInfo.TYPE_INPUT_METHOD: return "ime";
+            case AccessibilityWindowInfo.TYPE_SYSTEM: return "system";
+            case AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY: return "a11y-overlay";
+            case AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER: return "split-divider";
+            case AccessibilityWindowInfo.TYPE_MAGNIFICATION_OVERLAY: return "magnifier";
+            default: return String.valueOf(type);
+        }
+    }
+
     static java.util.Set<String> openPkgs() {
         CaptionService s = live;
         if (s == null) return java.util.Collections.emptySet();
@@ -1053,25 +1095,17 @@ public final class CaptionService extends AccessibilityService {
     private long decorsCheckedAt;
 
     /**
-     * Take the phone's own window decoration off the desktop display.
+     * Ask the desktop display not to show the platform's SYSTEM decorations.
      *
-     * <p>The desktop display is a PUBLIC virtual display running the platform's desktop
-     * decoration model: it draws a caption for every task on it — the launcher's own home
-     * included — and publishes a caption inset that shrinks each app's content. Our
-     * captions are drawn over the platform's, and our strip insets the app again, so a
-     * window ends up with two captions' worth of inset and one caption drawn: the top of
-     * the app is under both and the bottom of the frame is empty. That is the "close
-     * minimize button on the home" and the "app sits high, black below" pair, and no
-     * amount of caption suppression in THIS process could remove the platform's own bar.
+     * <p>What this does and does not do is worth writing down, because 0.7.16 claimed the
+     * wrong half of it. AOSP's `IWindowManager#setShouldShowSystemDecors` is documented as
+     * "system decors include status bar, navigation bar, launcher" — it is the switch for
+     * the bars, NOT for a window's caption. It is still worth setting (a display with no
+     * status or navigation bar is what a desktop looks like), but a caption drawn on a
+     * task is a WINDOW decoration and this call cannot remove it.
      *
-     * <p>scrcpy creates the display without SHOULD_SHOW_SYSTEM_DECORATIONS
-     * ({@code --no-vd-system-decorations}); this phone's decoration model does not read
-     * that flag. {@code Wm.setShouldShowSystemDecors} is the switch it does read, and
-     * uid 2000 (the daemon) holds the permission for it.
-     *
-     * <p>Re-asserted every ~10 s rather than once: the display is recreated whenever the
-     * session is, and a phone that drops the setting on a config change would otherwise
-     * bring the bar back mid-session with nothing in the log to show for it.
+     * <p>The caption is removed by making sure there is no caption to draw: the home is
+     * fullscreen (pinHome), and a fullscreen task wears none.
      */
     private void ensurePlatformCaptionsOff(int display) {
         if (wm == null) return;
@@ -1082,17 +1116,20 @@ public final class CaptionService extends AccessibilityService {
         wm.post(() -> {
             Boolean was = wm.decors(d, false);
             if (was == null) {
-                trace("the platform's decoration switch is not available on this phone");
+                trace("the platform's system-decoration switch is not available on this phone");
             } else if (was) {
-                DexLog.step("desktop", "the platform's own title bar was on display " + d
-                        + " — turned it off (it was drawing the home's caption and insetting"
-                        + " every app a second time)");
+                DexLog.step("desktop", "the platform showed its system bars on display " + d
+                        + " — turned them off");
             }
         });
     }
 
     /** Task id → when it was last asked to leave its freeform window (see pinHome). */
     private final Map<Integer, Long> homesUnfloated = new HashMap<>();
+    /** Task id → how many times it has been asked (see pinHome's escalation). */
+    private final Map<Integer, Integer> homeUnfloatTries = new HashMap<>();
+    /** When the home was last closed and restarted to escape a freeform task. */
+    private long homesRestartedAt;
 
     /**
      * The desktop's own launcher, in a freeform window: make it the display again.
@@ -1125,16 +1162,39 @@ public final class CaptionService extends AccessibilityService {
             if (!getPackageName().equals(t.pkg) || !isDesktopActivity(t.activity)) continue;
             if (!t.isFreeform()) {
                 homesUnfloated.remove(t.taskId);
+                homeUnfloatTries.remove(t.taskId);
                 continue;
             }
             Long asked = homesUnfloated.get(t.taskId);
             if (asked != null && now - asked < 4000) continue;
-            homesUnfloated.put(t.taskId, now);
             android.graphics.Point size = displaySize(display);
+            int tries = homeUnfloatTries.merge(t.taskId, 1, Integer::sum);
+            // Three passes and still a window: this release will not take the task out of
+            // freeform (setWindowingMode arrived in Android 12, and a vendor build may
+            // simply refuse). Then the task is REPLACED rather than repaired — closed, and
+            // the home started again through the daemon's HOME verb, which passes
+            // --windowingMode 1 and therefore makes a task that is fullscreen by
+            // construction and has no caption to draw. One flicker, once, beats a title
+            // bar that cannot be removed by anything this process is allowed to call.
+            if (tries >= 3) {
+                homeUnfloatTries.remove(t.taskId);
+                if (now - homesRestartedAt > 30_000) {
+                    homesRestartedAt = now;
+                    DexLog.step("desktop", "the desktop's home stayed a freeform window"
+                            + " (task " + t.taskId + ", mode " + t.windowingMode
+                            + ") — replacing the task with a fullscreen one");
+                    wm.post(() -> {
+                        wm.close(t.taskId);
+                        wm.home(display);
+                    });
+                }
+                continue;
+            }
+            homesUnfloated.put(t.taskId, now);
             boolean done = wm.unfloat(display, t.taskId, size.x, size.y);
             DexLog.step("desktop", "the desktop's home was in a freeform window (task "
-                    + t.taskId + ", mode " + t.windowingMode + ") — "
-                    + (done ? "made it the display again" : "could not"));
+                    + t.taskId + ", mode " + t.windowingMode + ") — attempt " + tries
+                    + (done ? ", made it the display again" : ", could not"));
         }
     }
 
@@ -1222,11 +1282,31 @@ public final class CaptionService extends AccessibilityService {
         // Kept in the daemon's order — TOPMOST FIRST — because stacking depends on it.
         // The map alone cannot carry this; HashMap order is not the z-order.
         List<WmClient.Task> stack = new ArrayList<>();
+        // The display's BASE task is its home, whatever the task list says about it.
+        //
+        // `isDesktopTask` matches on the task's package, and the package comes from the
+        // task's topActivity — which is NULL while a task is showing its starting window,
+        // and null again for a task whose activity has gone but whose task has not. On a
+        // task with no readable package `getPackageName().equals(t.pkg)` is false, so the
+        // home read as an ordinary window and got a caption: the "home a caption bar
+        // ekhono ache" report, with OUR minimise/maximise/close on it, sitting over the
+        // platform's own strip. The bottom-most root task of the desktop display can only
+        // ever be the desktop itself — apps open ABOVE it, in freeform — so that is the
+        // one task this service never dresses.
+        int baseId = -1;
+        for (int i = live.size() - 1; i >= 0; i--) {
+            baseId = live.get(i).taskId;      // last in the daemon's topmost-first order
+            break;
+        }
         for (WmClient.Task t : live) {
-            if (t.isFreeform() && t.visible && !isDesktopTask(t)) {
-                tasks.put(t.taskId, t);
-                stack.add(t);
+            if (!t.isFreeform() || !t.visible) continue;
+            if (isDesktopTask(t)) continue;
+            if (t.taskId == baseId && (t.pkg == null || t.pkg.isEmpty())) {
+                trace("the display's base task has no readable package — treating it as the home");
+                continue;
             }
+            tasks.put(t.taskId, t);
+            stack.add(t);
         }
         // Kept because `tasks` cannot carry it — see onShowDesktop, which is
         // the one caller that has to put windows back in the order it found

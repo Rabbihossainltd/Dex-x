@@ -268,6 +268,37 @@ check("minimise: closing and minimising collapse the window first",
       and "animating.add(id);" in caption_service,
       "CaptionService.animateOut")
 
+# ── 9d. the home can never wear a caption ───────────────────────────────────
+#
+# "home a caption bar ekhono ache": the exclusion used to be the package name only,
+# and the package comes from the task's topActivity — NULL while a task shows its
+# starting window. The bottom-most root task of the desktop display is the home
+# whatever the list says about it.
+check("home: the display's base task is never given a caption",
+      "the display's base task has no readable package" in caption_service
+      and "int baseId = -1;" in caption_service,
+      "CaptionService.applyTasks")
+
+check("home: a home the platform will not un-float is replaced, not just asked",
+      "homeUnfloatTries.merge(t.taskId, 1, Integer::sum)" in caption_service
+      and "replacing the task with a fullscreen one" in caption_service,
+      "CaptionService.pinHome")
+
+# ── 9e. the task manager lists what is open, hidden or not ──────────────────
+task_manager = launcher("TaskManagerActivity.java")
+check("minimise: the task manager lists minimised windows too",
+      "private LinkedHashSet<String> openPackages()" in task_manager
+      and "CaptionService.openPkgs()" in task_manager
+      and "for (String pkg : openPackages())" in task_manager
+      and "if (!openPackages().equals(shownPkgs)) rebuildAppList();" in task_manager,
+      "TaskManagerActivity.openPackages + tick")
+
+# ── 9f. a report can say WHO draws a caption ────────────────────────────────
+check("diagnostics: the accessibility windows on the desktop are in the report",
+      "static String describeWindows(int display)" in caption_service
+      and "CaptionService.describeWindows(desk)" in launcher("Diagnostics.java"),
+      "CaptionService.describeWindows + Diagnostics")
+
 # ── 10. versions agree everywhere ───────────────────────────────────────────
 gradle = read(ROOT / "openandroiddex-launcher/app/build.gradle")
 pkg = read(ROOT / "open-android-dex-tauri/package.json")

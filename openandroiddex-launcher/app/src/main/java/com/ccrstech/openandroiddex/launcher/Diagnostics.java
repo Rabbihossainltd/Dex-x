@@ -107,6 +107,15 @@ final class Diagnostics {
             b.append("(no task list: the daemon is not answering)\n");
         }
 
+        b.append("\n-- accessibility windows on the desktop display --\n");
+        try {
+            int desk = wm.desktopDisplay();
+            b.append(desk >= 0 ? CaptionService.describeWindows(desk)
+                    : "  (no desktop display)\n");
+        } catch (Throwable t) {
+            b.append("  threw: ").append(t).append('\n');
+        }
+
         b.append("\n-- caption fallback --\n");
         b.append("fallback bars on screen: ").append(CaptionFallback.barCount()).append('\n');
 
