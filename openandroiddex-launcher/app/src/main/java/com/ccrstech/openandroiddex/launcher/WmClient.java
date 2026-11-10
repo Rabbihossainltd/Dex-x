@@ -358,6 +358,20 @@ final class WmClient {
     }
 
     /**
+     * Take the task out of a freeform window and fill {@code displayId} with it.
+     *
+     * The one task this is for is the desktop's own launcher: it must never be a
+     * window, because a window is what wears the platform's minimize/maximize/close
+     * strip. The display defaults to freeform, and {@code force_resizable_activities=1}
+     * (which the desktop sets for its app windows) makes the launcher's own
+     * {@code android:resizeableActivity="false"} irrelevant — so any start that does
+     * not name a windowing mode puts it in a window. See WmDaemon's UNFLOAT.
+     */
+    boolean unfloat(int displayId, int taskId, int w, int h) {
+        return ok(request("UNFLOAT " + displayId + " " + taskId + " " + w + " " + h));
+    }
+
+    /**
      * Hand a launcher -> PC request to the daemon, under the id RequestProvider already
      * gave it.
      *

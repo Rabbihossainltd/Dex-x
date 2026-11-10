@@ -2443,6 +2443,30 @@ pub fn adb_start_launcher(
     )?;
 
     log::info!("launcher started on display {display_id}: {}", started_out.trim());
+    // The desktop's splash is watching for the launcher's first frame, and it
+    // may not start watching until the launcher has been STARTED: a display
+    // that has nothing on it yet is not necessarily blank — several phones put
+    // their own home screen (their wallpaper, their icons) on a public virtual
+    // display the moment it exists — and the splash's pixel probe read that as
+    // the desktop and opened onto it. That was the "dex home double": the
+    // phone's home first, the real desktop after. The starting window Android
+    // puts up for a launch is one opaque colour, so with this marker in place
+    // the probe cannot see anything but that until the launcher draws.
+    //
+    // Written whether or not the start was refused: a launch that fails leaves
+    // the splash showing whatever is there after its own give-up clock, which
+    // is the same place it would end up without the marker.
+    if let Err(e) = run_adb(
+        &app,
+        &[
+            "-s",
+            &serial,
+            "shell",
+            &format!("echo 1 > {}", crate::scrcpy::DESKTOP_LAUNCHER_STARTED_FILE),
+        ],
+    ) {
+        log::warn!("{serial}: could not open the splash's gate: {e}");
+    }
 
     // MUST come after the force-stop above, never before. Force-stopping a
     // package makes the framework prune its services out of

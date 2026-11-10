@@ -379,9 +379,9 @@ final class DexCursors {
      */
     private static boolean hostDrawsPointer(Context ctx) {
         if (ctx == null) return true;
-        String mode = DexPrefs.getString(ctx, DexPrefs.KEY_MOUSE_MODE,
-                DexPrefs.DEF_MOUSE_MODE);
-        return !"uhid".equals(mode);
+        // DexPrefs.mouseMode retires a stale pre-0.7.15 "uhid" (see there), so this
+        // answers what the PC is really doing rather than what was once stored.
+        return !"uhid".equals(DexPrefs.mouseMode(ctx));
     }
 
     static void apply(View view, int role) {

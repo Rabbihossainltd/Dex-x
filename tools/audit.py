@@ -44,11 +44,29 @@ check("pointer: the desktop asks for sdk mode",
       'mouseMode: "sdk"' in app_tsx, "App.tsx desktopOptions()")
 
 scrcpy = rust("scrcpy.rs")
-mouse_block = scrcpy[scrcpy.find('map.get("mouse")'):][:900]
+mouse_block = scrcpy[scrcpy.find('map.get("mouse2")'):][:900]
 check("pointer: only an explicit 'uhid' leaves sdk",
       'Some("uhid") => opts.mouse_mode = Some("uhid".into())' in mouse_block
       and '_ => opts.mouse_mode = None' in mouse_block,
       "apply_stored_config")
+
+# The stored row's name carries a version. Every build up to 0.7.14 wrote `mouse`,
+# so a phone switched to the phone-drawn pointer once kept it for good and no later
+# default could reach it. Nothing may read the old name again.
+check("pointer: a stored value from an older build cannot force uhid",
+      'map.get("mouse")' not in scrcpy and '"mouse2"' in scrcpy
+      and '"mouse2"' in launcher("SettingsActivity.java"),
+      "scrcpy.rs reads mouse2, SettingsActivity writes mouse2")
+
+# …and the phone's own half of the same stale value: the Settings card and the
+# cursor art both asked getString(KEY_MOUSE_MODE) directly, so an "uhid" written by
+# an older build still showed as selected there. DexPrefs.mouseMode retires it once.
+check("pointer: the phone retires the stale 'uhid' too, once",
+      "static String mouseMode(Context ctx)" in launcher("DexPrefs.java")
+      and "KEY_MOUSE_MIGRATED" in launcher("DexPrefs.java")
+      and "DexPrefs.mouseMode(this)" in launcher("SettingsActivity.java")
+      and "DexPrefs.mouseMode(ctx)" in launcher("DexCursors.java"),
+      "DexPrefs.mouseMode + both readers")
 
 prefs = launcher("DexPrefs.java")
 check("pointer: the launcher's default mode is sdk",
@@ -56,7 +74,8 @@ check("pointer: the launcher's default mode is sdk",
 
 cursors = launcher("DexCursors.java")
 check("pointer: our own cursor art is not applied in sdk mode",
-      "hostDrawsPointer" in cursors and '!"uhid".equals(mode)' in cursors, "DexCursors.apply")
+      "hostDrawsPointer" in cursors and 'return !"uhid".equals(DexPrefs.mouseMode(ctx));' in cursors,
+      "DexCursors.hostDrawsPointer")
 
 check("pointer: speed is never sent as a raw 1:1 lie",
       "DEF_CURSOR_SPEED = 0" in prefs, "DexPrefs.DEF_CURSOR_SPEED")
@@ -178,7 +197,52 @@ check("resize: a gesture is not re-placed by a poll while it runs",
 check("resize: the fallback's right band starts under the title bar, not two bars down",
       "lp.y = b.top + px;" in fallback, "CaptionFallback.Band.place")
 
-# ── 8. versions agree everywhere ────────────────────────────────────────────
+# ── 8. the desktop's own home: the display, never a window ──────────────────
+#
+# Two reports in one: "dex home double" (the phone's own home screen shown on the
+# desktop display before ours, because the display was empty and the platform put
+# it there) and "home er upore close minimize keno" (our launcher in a FREEFORM
+# task, wearing the platform's caption — force_resizable_activities overrides
+# android:resizeableActivity, so the manifest attribute never protected it).
+
+daemon = read(ROOT / "openandroiddex-wmd/src/com/ccrstech/openandroiddex/wmd/WmDaemon.java")
+home_case = daemon[daemon.find('case "HOME":'):][:2000]
+check("home: the daemon starts it fullscreen, not into the display's freeform default",
+      "--windowingMode 1" in home_case, "WmDaemon HOME")
+
+check("home: a freeform home can be taken back out of its window",
+      'case "UNFLOAT":' in daemon and 'request("UNFLOAT ' in launcher("WmClient.java"),
+      "WmDaemon UNFLOAT + WmClient.unfloat")
+
+caption_service = launcher("CaptionService.java")
+check("home: the reconcile takes a freeform home back to the display",
+      "pinHome(display, live);" in caption_service
+      and "wm.unfloat(display, t.taskId" in caption_service, "CaptionService.pinHome")
+
+check("home: the platform's home is swept every pass while ours is missing",
+      "ticks % 10 == 0 || !desktopHomeAlive(live)" in caption_service,
+      "CaptionService.applyTasks")
+
+splash_patch = read(ROOT / "openandroiddex-scrcpy/splash-gate.patch")
+build_mjs = read(ROOT / "openandroiddex-scrcpy/build.mjs")
+check("home: the splash may not open the display before the launcher has started",
+      "splash.mayOpen()" in splash_patch and "CAN_OPEN" in splash_patch
+      and "splash-gate.patch" in build_mjs,
+      "openandroiddex-scrcpy/splash-gate.patch")
+
+adb = rust("adb.rs")
+check("home: the computer opens the splash's gate when it starts the launcher",
+      "DESKTOP_LAUNCHER_STARTED_FILE" in adb
+      and "DESKTOP_LAUNCHER_STARTED_FILE" in scrcpy,
+      "adb_start_launcher writes, request_desktop_splash clears")
+
+# ── 9. the platform's navigation bar stays out of the taskbar's band ────────
+check("nav: the taskbar's band is excluded from the system's gestures",
+      "setSystemGestureExclusionRects(keep)" in launcher_activity
+      and "excludeBottomGestures(v);" in launcher_activity,
+      "LauncherActivity.excludeBottomGestures")
+
+# ── 10. versions agree everywhere ───────────────────────────────────────────
 gradle = read(ROOT / "openandroiddex-launcher/app/build.gradle")
 pkg = read(ROOT / "open-android-dex-tauri/package.json")
 cargo = read(ROOT / "open-android-dex-tauri/src-tauri/Cargo.toml")

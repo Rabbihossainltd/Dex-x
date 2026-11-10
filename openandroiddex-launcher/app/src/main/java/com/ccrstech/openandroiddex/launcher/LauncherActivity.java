@@ -525,8 +525,41 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         if (root == null) return;
         root.setOnApplyWindowInsetsListener((v, insets) -> {
             syncNavCluster();
+            excludeBottomGestures(v);
             return v.onApplyWindowInsets(insets);
         });
+    }
+
+    /**
+     * Tell the platform that the bottom of the desktop is not its gesture area.
+     *
+     * <p>The desktop's taskbar runs along the bottom edge, which is exactly where the
+     * system's gesture navigation lives. Immersive sticky hides the bar, but a swipe —
+     * and on several phones a pointer merely taken to the bottom edge — brings it back
+     * transiently over the taskbar, and it hides itself again a second later. That is
+     * the report: "niche mouse niye gele navigation bar ashe abar auto hide hoi". The
+     * bar is not ours to delete with a flag: it is the system's, drawn over every
+     * window on the display.
+     *
+     * <p>{@code setSystemGestureExclusionRects} is the one thing an app may say about
+     * it: the listed area does not belong to the system's gestures. Applied to the
+     * decor view, in its own coordinates, over the taskbar's band (and a little above,
+     * because the gesture slop starts a few dp inside the edge). The platform caps the
+     * total at 200dp per edge, and TASKBAR_DP plus the slop is well inside it.
+     *
+     * <p>Re-applied on every inset pass rather than once: the rects are in window
+     * coordinates, and this window is re-laid out whenever the display's size or
+     * density changes.
+     */
+    private void excludeBottomGestures(View root) {
+        if (onPhone() || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return;
+        int h = root.getHeight();
+        int w = root.getWidth();
+        if (h <= 0 || w <= 0) return;
+        int band = Math.min(h, dp(TASKBAR_DP + 16));
+        java.util.List<android.graphics.Rect> keep = new java.util.ArrayList<>(1);
+        keep.add(new android.graphics.Rect(0, h - band, w, h));
+        root.setSystemGestureExclusionRects(keep);
     }
 
     /**

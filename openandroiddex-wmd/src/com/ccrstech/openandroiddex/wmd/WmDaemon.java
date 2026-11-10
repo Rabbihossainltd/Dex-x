@@ -342,10 +342,53 @@ public final class WmDaemon {
                     out.println("ERR no desktop display");
                     return;
                 }
-                String r = sh("am start --display " + d
+                // --windowingMode 1, and NOT optional. The desktop display
+                // defaults to FREEFORM (that is what enable_freeform_support
+                // buys us), so a start with no mode lands the launcher in a
+                // small freeform window wearing the platform's caption —
+                // minimize, maximize, close — over the desktop's wallpaper.
+                // That is the "dex home er upore close minimize keno" report,
+                // and it comes from here: the computer's own start
+                // (adb.rs's adb_start_launcher) always pinned mode 1, so the
+                // launcher looked right until something raised it through
+                // this verb and it came back as a window.
+                //
+                // android:resizeableActivity="false" does NOT save it:
+                // prepare_desktop sets force_resizable_activities=1 for the
+                // whole phone, and that setting makes every activity
+                // resizeable — freeform takes it.
+                String r = sh("am start --display " + d + " --windowingMode 1"
                         + " -n " + LAUNCHER + "/" + LAUNCHER + ".LauncherActivity");
                 out.println(r.contains("Error") || r.contains("Exception")
                         ? "ERR " + r.replace('\n', ' ') : "OK " + d);
+                return;
+            }
+
+            case "UNFLOAT": {
+                // "UNFLOAT <displayId> <taskId> <w> <h>" — take a task OUT of a
+                // freeform window and fill its display with it, caption strip
+                // and all removed.
+                //
+                // The same work as NATIVE (windowing mode first, then bounds,
+                // app bounds and no caption inset) for the one task that must
+                // never be a window: the desktop's own launcher. It is only
+                // ever called when the launcher has been found in a freeform
+                // task — by CaptionService, which polls the task list — so a
+                // desktop that is already fullscreen never sees a transaction.
+                Wm.TaskRec t = Wm.taskById(i(a, 1), i(a, 2));
+                Rect full = new Rect(0, 0, Math.max(1, i(a, 3)), Math.max(1, i(a, 4)));
+                Object wct = Wm.newTransaction();
+                boolean modeSet = true;
+                try {
+                    Wm.setWindowingMode(wct, t.token, Wm.MODE_FULLSCREEN);
+                } catch (Throwable e) {
+                    modeSet = false;
+                }
+                Wm.setBounds(wct, t.token, full);
+                Wm.setAppBounds(wct, t.token, full);
+                Wm.removeCaptionInset(wct, t.token);
+                Wm.transition(wct);
+                out.println(modeSet ? "OK" : "OK bounds-only");
                 return;
             }
 

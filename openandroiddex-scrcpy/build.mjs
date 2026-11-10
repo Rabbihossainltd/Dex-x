@@ -66,12 +66,16 @@ if (head() !== SCRCPY_COMMIT) {
   console.log(`[1/4] scrcpy v${SCRCPY_VERSION} already in ${relative(process.cwd(), src)}`)
 }
 
-console.log('[2/4] apply display-scale.patch, desktop-splash.patch, secure-display.patch')
+console.log('[2/4] apply display-scale.patch, desktop-splash.patch, secure-display.patch, splash-gate.patch')
 run('git', ['-C', src, 'checkout', '--quiet', '--', '.'])
 run('git', ['-C', src, 'clean', '--quiet', '-fd'])
 run('git', ['-C', src, 'apply', join(here, 'display-scale.patch')])
 run('git', ['-C', src, 'apply', join(here, 'desktop-splash.patch')])
 run('git', ['-C', src, 'apply', join(here, 'secure-display.patch')])
+// splash-gate.patch, last: the desktop splash may not open onto the display until the
+// computer has STARTED the launcher (a display with nothing on it shows the platform's
+// own home on several phones, and the probe read that as "the desktop has drawn").
+run('git', ['-C', src, 'apply', join(here, 'splash-gate.patch')])
 
 // ── the toolchain ─────────────────────────────────────────────────────────
 

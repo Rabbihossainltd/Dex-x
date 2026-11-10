@@ -607,6 +607,35 @@ final class DexPrefs {
     }
 
     /** The selected shell, "dex" or "win11". */
+    /**
+     * Who draws the mouse pointer: {@code "sdk"} (the computer, i.e. Windows' own
+     * arrow) or {@code "uhid"} (the phone).
+     *
+     * <p>Read through here rather than {@link #getString}, because the STORED value
+     * cannot be trusted on a phone that ran any build before 0.7.15: that build's
+     * Settings wrote {@code "uhid"} the moment anyone tried the phone-drawn
+     * pointer, and nothing ever wrote it back. The default was changed to
+     * {@code "sdk"} in 0.7.12 and every report after it — "cursor emon keno?" —
+     * was reading a setting nobody had chosen since.
+     *
+     * <p>So the first read after an upgrade retires that value once, and only
+     * once: {@link #KEY_MOUSE_MIGRATED} is the marker, so a pick made from the
+     * new Settings survives every later start. The PC reads the same intent from
+     * its own side of the wire (scrcpy.rs reads {@code mouse2}, which only the new
+     * Settings writes), so the two halves cannot disagree.
+     */
+    static String mouseMode(Context ctx) {
+        if (!getBool(ctx, KEY_MOUSE_MIGRATED, false)) {
+            put(ctx, KEY_MOUSE_MIGRATED, true);
+            put(ctx, KEY_MOUSE_MODE, DEF_MOUSE_MODE);
+            return DEF_MOUSE_MODE;
+        }
+        return getString(ctx, KEY_MOUSE_MODE, DEF_MOUSE_MODE);
+    }
+
+    /** One-time marker for {@link #mouseMode}: the stale pre-0.7.15 value is retired. */
+    static final String KEY_MOUSE_MIGRATED = PC_PREFIX + "mouse2_migrated";
+
     static String shell(Context ctx) {
         return getString(ctx, KEY_SHELL, DEF_SHELL);
     }

@@ -1046,6 +1046,53 @@ public final class CaptionService extends AccessibilityService {
      * the user's is lost. We only ever remove one whose package IS the current
      * HOME package and is not ours — never a package the user opened.
      */
+    /** Task id → when it was last asked to leave its freeform window (see pinHome). */
+    private final Map<Integer, Long> homesUnfloated = new HashMap<>();
+
+    /**
+     * The desktop's own launcher, in a freeform window: make it the display again.
+     *
+     * <p>A freeform task wears the platform's own caption — minimize, maximize, CLOSE —
+     * and that strip is the "dex home er upore close minimize keno" report. It is not a
+     * style choice and not something our own captions can remove: the desktop display is
+     * created FREEFORM (enable_freeform_support is what lets app windows float), so a
+     * start that does not name a windowing mode lands the launcher in a window. The
+     * computer's own start pins mode 1 (adb.rs), the daemon's HOME verb now does too, but
+     * anything that started it before either of those still leaves the task in freeform —
+     * a task keeps the mode it was made with — so the evidence in the task list is what
+     * this acts on.
+     *
+     * <p>{@code android:resizeableActivity="false"} cannot help here: prepare_desktop sets
+     * {@code force_resizable_activities=1} for the whole phone, and that setting makes
+     * every activity resizeable. 0.7.12's fix was that manifest attribute, which is why it
+     * never changed anything on a phone that had been through prepare_desktop.
+     *
+     * <p>Taken out the same way NATIVE takes a task off the desktop: mode first, then
+     * bounds, app bounds and no caption inset, in one transition. Asked once per task per
+     * few seconds — on a platform without setWindowingMode the answer is "bounds-only" and
+     * the task still reads as freeform, and asking on every 60 ms poll would spend the
+     * session in transactions.
+     */
+    private void pinHome(int display, List<WmClient.Task> live) {
+        if (live == null || wm == null) return;
+        long now = SystemClock.uptimeMillis();
+        for (WmClient.Task t : live) {
+            if (!getPackageName().equals(t.pkg) || !isDesktopActivity(t.activity)) continue;
+            if (!t.isFreeform()) {
+                homesUnfloated.remove(t.taskId);
+                continue;
+            }
+            Long asked = homesUnfloated.get(t.taskId);
+            if (asked != null && now - asked < 4000) continue;
+            homesUnfloated.put(t.taskId, now);
+            android.graphics.Point size = displaySize(display);
+            boolean done = wm.unfloat(display, t.taskId, size.x, size.y);
+            DexLog.step("desktop", "the desktop's home was in a freeform window (task "
+                    + t.taskId + ", mode " + t.windowingMode + ") — "
+                    + (done ? "made it the display again" : "could not"));
+        }
+    }
+
     private void sweepForeignHome(int display, List<WmClient.Task> live) {
         if (live == null || live.isEmpty()) return;
         String home = platformHomePkg();
@@ -1061,8 +1108,14 @@ public final class CaptionService extends AccessibilityService {
             if (homesSwept.size() > 8) homesSwept.clear();
             if (!homesSwept.add(t.taskId)) return;
             boolean gone = wm != null && wm.close(t.taskId);
+            if (!gone) {
+                // Not swept after all: a refused close has to be asked again, or one
+                // failed answer leaves the phone's home sitting on the display for the
+                // rest of the session — the same screen this sweep exists to remove.
+                homesSwept.remove(t.taskId);
+            }
             DexLog.step("desktop", "the platform's home was on the desktop display (task "
-                    + t.taskId + ") — " + (gone ? "closed it" : "could not close it"));
+                    + t.taskId + ") — " + (gone ? "closed it" : "will ask again"));
             return;
         }
     }
@@ -1090,9 +1143,17 @@ public final class CaptionService extends AccessibilityService {
 
     private boolean applyTasks(int display, List<WmClient.Task> live) {
         trackDensity(display);
+        // The desktop's own launcher must never be a window — see pinHome. Every
+        // pass, because the whole start is a race and a freeform home is what the
+        // user sees for as long as this takes to notice.
+        pinHome(display, live);
         // Once every ~4 s at the idle tick: a home task that is gone stays gone,
         // and a loop here would close the same task hundreds of times a minute.
-        if (ticks % 10 == 0) sweepForeignHome(display, live);
+        // …except while OUR home is missing, which is exactly when the platform's
+        // own home is what the display has fallen back to: then every pass, because
+        // that is the screen the user reports as "a second Dex home with the phone's
+        // wallpaper". Four seconds of it is four seconds of the wrong desktop.
+        if (ticks % 10 == 0 || !desktopHomeAlive(live)) sweepForeignHome(display, live);
         // …and the mirror of it: if OUR home is gone from the display, put it back.
         //
         // A caption's ✕ used to be able to close it (see isDesktopActivity), and an app

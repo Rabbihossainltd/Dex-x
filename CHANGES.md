@@ -128,6 +128,91 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.15 — the desktop's own home, the phone's home screen, and a setting nobody chose
+
+Four reports. Three of them share a cause that has been in the code since the desktop was,
+and the fourth is a limitation of Android that no amount of patching removes — so it says so.
+
+### 1. "Dex home double" — the phone's home screen was on the desktop display
+
+Two screens in a row: first one with nothing on it but a button (the phone's own wallpaper
+behind it), then the real desktop. The second one is ours. The first one came from three
+places at once:
+
+* **The splash's pixel probe.** The desktop's splash decides the desktop has drawn by
+  sampling the display and looking for anything that is not one flat colour. A virtual
+  display that has no task on it yet is not necessarily blank: several phones put their
+  own home screen — their wallpaper, their icons — on a public display the moment it
+  exists. The probe read that as "the desktop is up", opened, and the user was shown the
+  phone's home first. The splash may now look at the pixels **only after the computer has
+  started the launcher** (`splash-gate.patch`, a marker in `/data/local/tmp` written by
+  `adb_start_launcher`, cleared by every session that asks for a splash).
+* **The platform's own home task.** If the phone puts its launcher on the desktop display,
+  `CaptionService` sweeps it away — once every four seconds, and only if the close
+  succeeded. Both halves are wrong when it is the only home there is: the sweep now runs on
+  **every pass while our own home is missing**, and a refused close is asked again instead
+  of being remembered as done.
+* **A freeform home.** That is the other half of report #1 — see below.
+
+### 2. "…and the second one has close/minimize — why?"
+
+A freeform task wears the platform's caption. Our desktop's home must never be a window,
+and `android:resizeableActivity="false"` does not make that true: `prepare_desktop` sets
+`force_resizable_activities=1` for the whole phone, and that setting makes **every**
+activity resizeable. 0.7.12 relied on the manifest attribute, which is why the report
+survived it.
+
+The real cause was the daemon's `HOME` verb: `am start` with no windowing mode, onto a
+display whose default mode is FREEFORM — the launcher came back as a small window with a
+caption. It is now `--windowingMode 1`, matching the computer's own start. And because a
+task keeps the mode it was made with, the reconcile now also **takes a freeform home back
+out of its window** (`WmDaemon UNFLOAT` → fullscreen, bounds, app bounds, caption inset
+removed, one transition). Any start from anywhere — a stale intent, a notification, a
+resume after the display was rebuilt — self-heals on the next poll.
+
+### 3. "The navigation bar comes back when I take the mouse to the bottom"
+
+It is the system's own gesture bar, not ours: immersive sticky hides it, and a pointer at
+the bottom edge brings it back transiently over the taskbar, then it hides itself. The one
+thing an app may say about that area is `setSystemGestureExclusionRects`, so the taskbar's
+band (plus the gesture slop) is now excluded, re-applied whenever the window is laid out.
+It cannot be *deleted* — it is drawn by the system over every window on the display — but
+it no longer appears for a pointer that is only on its way to a taskbar button.
+
+### 4. "The cursor — why does it look like that?"
+
+Because of a setting nobody chose. Every build up to 0.7.14 wrote the pointer mode to a key
+called `mouse`, so anyone who once tried the phone-drawn pointer kept it **for good**: the
+0.7.12 change of default could not reach it, and every report since was reading a stored
+value rather than the default. That key is retired on both sides:
+
+* the PC reads `mouse2` only, which only the new Settings writes;
+* the phone retires the stale value once (`DexPrefs.mouseMode`, marker
+  `stream_mouse2_migrated`), so the Settings card and the cursor art agree with the PC.
+
+The default — and now the real behaviour — is the computer's own pointer: Windows' arrow,
+free to leave the window, one pixel for one pixel. No Android art, no resize handles drawn
+by us, exactly as the report asked.
+
+### 5. Sound: what you answered
+
+Android has **one** audio capture path for the whole device. `output` moves the entire mix
+to the computer and silences the phone; `playback` is a copy apps may refuse; `--audio-dup`
+plays it on the phone as well. There is no "the Dex display's audio here, the phone's own
+audio there" — the phone's video, its music and the desktop's sound are one stream. You
+chose **the desktop's sound here and the phone silent**, which is what 0.7.14 already does;
+nothing changed in this build, and this note is here so the behaviour is a decision rather
+than a surprise.
+
+### 6. The audit, now 39 checks
+
+`tools/audit.py` grew the checks this round turns into promises: the daemon's `HOME` pins
+fullscreen, `UNFLOAT` exists on both sides, `pinHome` runs from the reconcile, the platform
+home is swept every pass while ours is missing, the splash cannot open before the launcher
+starts, the computer opens that gate, the taskbar's band is excluded from the system
+gestures, and neither side can be dragged back to `uhid` by a stored value from an older
+build. **39/39 pass.**
+
 ## v0.7.14 — going deeper: scrcpy's own documentation, and edges that are really ours
 
 Two asks in this round: go deeper, and try another way. Both are in this build, plus the first

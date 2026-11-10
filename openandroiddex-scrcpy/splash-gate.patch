@@ -1,0 +1,102 @@
+diff --git a/server/src/main/java/com/genymobile/scrcpy/video/DesktopSplash.java b/server/src/main/java/com/genymobile/scrcpy/video/DesktopSplash.java
+index 2604257..be83067 100644
+--- a/server/src/main/java/com/genymobile/scrcpy/video/DesktopSplash.java
++++ b/server/src/main/java/com/genymobile/scrcpy/video/DesktopSplash.java
+@@ -25,11 +25,38 @@ import java.io.File;
+  * <p>Nothing tells the server that the launcher has drawn, and nothing has to: an empty display is a
+  * single colour, and so is the starting window Android puts up while the launcher starts, everywhere
+  * but its centre. The first frame that is not is the desktop.
++ *
++ * <p>What the pixels cannot tell is <em>whose</em> screen this is. A display with no task on it is
++ * whatever the platform puts there, and on several phones that is the phone's own home screen — the
++ * phone's wallpaper, its icons — from the moment the display exists until the computer has finished
++ * installing the launcher and started it, four or five seconds later. The probe saw that as "not a
++ * fill", opened the splash onto it, and the user was shown a second home screen before the real
++ * desktop arrived ("dex home double keno?"). So the probe is not allowed to open anything until the
++ * computer says the launcher has been STARTED: it writes {@link #CAN_OPEN} after its own
++ * {@code am start}, and until then the splash stays over whatever is behind it. The starting window
++ * the launcher puts up is a single opaque colour, so the moment the gate opens is still not read as
++ * the desktop — pixels alone decide that, from there on, exactly as before.
+  */
+ public final class DesktopSplash {
+ 
+     public static final String FILE = "/data/local/tmp/oadx-desktop-splash";
+ 
++    /**
++     * The computer has started the launcher on the display: the splash may look at the pixels now.
++     *
++     * <p>Written by the computer right after its {@code am start} (adb.rs, adb_start_launcher) and
++     * removed by {@link #claim()} with the request, so a marker from a previous session can never
++     * open this one's splash. Absent — or the desktop was started by something that does not write
++     * it — the splash simply waits out its own give-up clock.
++     */
++    public static final String CAN_OPEN = "/data/local/tmp/oadx-desktop-launcher-started";
++
++    /** How often the marker is looked for, in ms. Opening is a one-way door; this is not hot. */
++    private static final long CAN_OPEN_EVERY_MS = 200;
++
++    private static boolean canOpen;
++    private static long canOpenAt;
++
+     /** Older than this, the file is a desktop that never started, not a request. */
+     private static final long FRESH_MS = 60_000;
+ 
+@@ -64,6 +91,15 @@ public final class DesktopSplash {
+         if (!file.delete()) {
+             Ln.w("Desktop splash: could not remove " + FILE);
+         }
++        // The gate belongs to THIS request, not to the last one: a marker left behind by a
++        // session that died between its start and its draw would otherwise open the next
++        // splash onto exactly the foreign screen this exists to hide.
++        File canOpen = new File(CAN_OPEN);
++        if (canOpen.exists() && !canOpen.delete()) {
++            Ln.w("Desktop splash: could not remove " + CAN_OPEN);
++        }
++        canOpen = false;
++        canOpenAt = 0;
+         return fresh ? new DesktopSplash() : null;
+     }
+ 
+@@ -76,6 +112,23 @@ public final class DesktopSplash {
+         return (nowNs - startNs) / 1e9f;
+     }
+ 
++    /** May the splash look at the display yet? See {@link #CAN_OPEN}. */
++    public boolean mayOpen() {
++        if (canOpen) {
++            return true;
++        }
++        long now = System.currentTimeMillis();
++        if (now - canOpenAt < CAN_OPEN_EVERY_MS) {
++            return false;
++        }
++        canOpenAt = now;
++        canOpen = new File(CAN_OPEN).exists();
++        if (canOpen) {
++            Ln.i("Desktop splash: the launcher has been started — watching for its first frame");
++        }
++        return canOpen;
++    }
++
+     /** The launcher has drawn the desktop. */
+     public synchronized void ready(long nowNs) {
+         if (readyNs < 0) {
+diff --git a/server/src/main/java/com/genymobile/scrcpy/video/DesktopSplashFilter.java b/server/src/main/java/com/genymobile/scrcpy/video/DesktopSplashFilter.java
+index 1415d72..a415bc5 100644
+--- a/server/src/main/java/com/genymobile/scrcpy/video/DesktopSplashFilter.java
++++ b/server/src/main/java/com/genymobile/scrcpy/video/DesktopSplashFilter.java
+@@ -564,8 +564,12 @@ public final class DesktopSplashFilter implements AnimatedOpenGLFilter {
+         long now = System.nanoTime();
+         float time = splash.time(now);
+         if (hasFrame && !splash.isReady() && ++frames % PROBE_EVERY == 0) {
+-            // Twice in a row, a tenth of a second apart: drawn, and staying drawn
+-            drawnProbes = probe(textureId, texMatrix) ? drawnProbes + 1 : 0;
++            // Twice in a row, a tenth of a second apart: drawn, and staying drawn — but only
++            // once the computer says the launcher has been started. Before that the display is
++            // whatever the platform put there (on several phones, the phone's own home screen),
++            // and opening onto it is a second home screen before the real desktop.
++            boolean mayOpen = splash.mayOpen();
++            drawnProbes = mayOpen && probe(textureId, texMatrix) ? drawnProbes + 1 : 0;
+             if (drawnProbes >= 2) {
+                 splash.ready(now);
+             }

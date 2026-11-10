@@ -2140,7 +2140,10 @@ public class SettingsActivity extends Activity {
      * user conclude the styles are broken.
      */
     private void buildMouseSection(LinearLayout body) {
-        String mode = DexPrefs.getString(this, DexPrefs.KEY_MOUSE_MODE, DexPrefs.DEF_MOUSE_MODE);
+        // Through DexPrefs.mouseMode, not getString: it retires the "uhid" that
+        // every build before 0.7.15 could have written and never took back, so the
+        // dot on this card shows what the PC is actually doing.
+        String mode = DexPrefs.mouseMode(this);
         boolean phoneDraws = "uhid".equals(mode);
         String style = DexCursors.style(this);
         boolean custom = !DexCursors.STYLE_SYSTEM.equals(style);
@@ -2779,7 +2782,15 @@ public class SettingsActivity extends Activity {
         };
         for (String[] entry : modes) {
             choiceRow(card, null, entry[1], entry[2], entry[0].equals(mode), () -> {
-                pcConfig(DexPrefs.KEY_MOUSE_MODE, entry[0]);
+                // Sent as `mouse2`, not `mouse`. Every build up to 0.7.14 wrote
+                // `mouse`, so a phone switched to the phone-drawn pointer ONCE kept
+                // it for good — the 0.7.12 change of default never reached it, and
+                // "cursor emon keno?" was reading that stored row rather than the
+                // default. The PC now reads only `mouse2` (scpy.rs,
+                // apply_stored_config), so the stale row is inert and a pick made
+                // here is a pick that means it.
+                DexPrefs.put(this, DexPrefs.KEY_MOUSE_MODE, entry[0]);
+                pushAs(MOUSE_PC_KEY, entry[0]);
                 showSection(SEC_MOUSE, false);
             });
         }
@@ -2911,6 +2922,18 @@ public class SettingsActivity extends Activity {
 
     private void push(String key, String value) {
         RequestProvider.enqueue("cfg", key.substring(DexPrefs.PC_PREFIX.length()) + "." + value);
+    }
+
+    /**
+     * The PC-side key for "who draws the pointer", deliberately not the pref's own
+     * name: see {@link #buildRenderingCard}. Must match {@code scrcpy.rs}'s
+     * apply_stored_config, which reads this key and nothing else.
+     */
+    private static final String MOUSE_PC_KEY = "mouse2";
+
+    /** {@link #push} for a PC-side key that is not a pref key (no prefix to strip). */
+    private void pushAs(String pcKey, String value) {
+        RequestProvider.enqueue("cfg", pcKey + "." + value);
     }
 
     /**

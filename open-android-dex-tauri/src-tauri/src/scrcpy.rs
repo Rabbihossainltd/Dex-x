@@ -902,14 +902,30 @@ fn write_display_scale(app: &AppHandle, serial: &str, scale: f64) {
 /// splash (DesktopSplash.FILE in openandroiddex-scrcpy).
 const DESKTOP_SPLASH_FILE: &str = "/data/local/tmp/oadx-desktop-splash";
 
+/// Where the patched scrcpy server looks for the computer's word that the
+/// launcher has been STARTED, which is what lets the splash look at the
+/// display at all (DesktopSplash.CAN_OPEN in openandroiddex-scrcpy).
+pub(crate) const DESKTOP_LAUNCHER_STARTED_FILE: &str = "/data/local/tmp/oadx-desktop-launcher-started";
+
 /// Ask the server about to start for the desktop's splash: the stream carries
 /// it from its first frame instead of the empty display the launcher is only
 /// started on seconds later, and it opens onto the desktop once the launcher
 /// has drawn (doc/desktop-splash.md). Before the server starts, which takes
 /// the file as it makes the display and removes it, so the display of an app
 /// window started after this one never plays it.
+///
+/// The gate marker is removed here too. A display with nothing on it is not
+/// necessarily blank — several phones put their own home screen on a public
+/// virtual display the moment it exists — and the splash's pixel probe used to
+/// read that as "the desktop has drawn" and open onto it: a second home screen,
+/// with the phone's wallpaper, before the real desktop ("dex home double
+/// keno?"). The probe is therefore not allowed to look until the launcher has
+/// been started (adb_start_launcher writes the marker), and a marker left over
+/// from a previous session must not open this one's splash.
 fn request_desktop_splash(app: &AppHandle, serial: &str) {
-    let cmd = format!("echo 1 > {DESKTOP_SPLASH_FILE}");
+    let cmd = format!(
+        "rm -f {DESKTOP_LAUNCHER_STARTED_FILE}; echo 1 > {DESKTOP_SPLASH_FILE}"
+    );
     if let Err(e) = adb::run_adb(app, &["-s", serial, "shell", &cmd]) {
         log::warn!("{serial}: could not ask for the desktop's splash: {e}");
     }
@@ -1765,7 +1781,15 @@ fn apply_stored_config(app: &AppHandle, opts: &mut MirrorOptions) {
     // in Android's style. sdk is the computer's cursor: free, 1:1, Windows'
     // own. The desktop asked for sdk (App.tsx); an explicit "uhid" in the
     // stored settings is the only thing that changes it.
-    match map.get("mouse").map(String::as_str) {
+    //
+    // The key is `mouse2`, not `mouse`, and that is the fix for a cursor that
+    // was nobody's choice: every build up to 0.7.14 wrote `mouse`, so a phone
+    // that had once been switched to the phone-drawn pointer kept it for good —
+    // the 0.7.12 change of default could not reach it, and every report after
+    // it ("cursor emon keno?") was reading a stored value, not the default.
+    // Nothing reads `mouse` any more, so the stale row is inert; a fresh pick
+    // in Settings writes `mouse2` and means it.
+    match map.get("mouse2").map(String::as_str) {
         Some("uhid") => opts.mouse_mode = Some("uhid".into()),
         _ => opts.mouse_mode = None, // "sdk", unset — the computer's pointer
     }
@@ -3358,6 +3382,7 @@ impl RequestPump {
                 if what == "audio" || what == "audiodup" || what == "reset" {
                     audio_dirty = true;
                 }
+
                 true
             } else if cmd == "perf" {
                 // "Reduce quality" (Settings → Performance). The launcher does
