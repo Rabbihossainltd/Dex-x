@@ -195,16 +195,28 @@ final class CaptionFallback {
                 continue;
             }
             live.add(t.taskId);
-            if (!t.hasStrip(px)) wm.strip(display, t.taskId, px);
+            // The same rule the accessibility renderer follows (see
+            // WmClient.Task#platformCaption): where the platform has already inset the
+            // task for its own caption, our bar is exactly that tall and we reserve
+            // nothing ourselves. Two insets is the content pushed down with the empty
+            // black band under it; a bar of the wrong height is the platform's buttons
+            // showing under ours.
+            final int platformPx = t.platformCaption();
+            final int barPx = platformPx > 0 ? platformPx : px;
+            // Reserve only where NOTHING is reserved — never release. The release
+            // bookkeeping lives in CaptionService, which knows which strip it asked for;
+            // a second renderer releasing them would be a strip/unstrip ping-pong on one
+            // task's app bounds, and the window would flicker forever.
+            if (platformPx == 0 && t.appTop == t.top) wm.strip(display, t.taskId, px);
             Bar b = bars.get(t.taskId);
             if (b == null) {
-                b = add(wc, t, px);
+                b = add(wc, t, barPx);
                 if (b == null) continue;
                 bars.put(t.taskId, b);
                 DexLog.step("caption", "fallback bar task=" + t.taskId + " " + t.pkg
                         + " " + (t.right - t.left) + "x" + (t.bottom - t.top));
             }
-            b.sync(t, px);
+            b.sync(t, barPx);
         }
         for (Bar b : new ArrayList<>(bars.values())) {
             if (!live.contains(b.taskId)) {

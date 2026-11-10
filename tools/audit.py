@@ -299,6 +299,94 @@ check("diagnostics: the accessibility windows on the desktop are in the report",
       and "CaptionService.describeWindows(desk)" in launcher("Diagnostics.java"),
       "CaptionService.describeWindows + Diagnostics")
 
+# ── 9g. ONE caption inset, measured, never guessed ──────────────────────────
+#
+# AOSP draws a caption on every freeform task and nothing a third-party app can
+# call removes it (CaptionWindowDecorViewModel.shouldShowWindowDecor returns
+# true for WINDOWING_MODE_FREEFORM before it looks at anything else). The space
+# it takes is published as the app-bounds inset, so the only correct bar is one
+# exactly that tall, over the top of it — and the only correct reservation is
+# none of our own.
+wm_client = launcher("WmClient.java")
+check("caption: the platform's own caption height is read from the task",
+      "int platformCaption()" in wm_client
+      and "int d = appTop - top;" in wm_client
+      and "boolean hasPlatformCaption()" in wm_client,
+      "WmClient.Task.platformCaption")
+
+rule = launcher("CaptionRule.java")
+check("caption: the rule is pure — no android, no service state — so it can be run",
+      "import android" not in rule and "static Plan decide(int top, int appTop" in rule,
+      "CaptionRule.decide")
+
+check("caption: our bar is built to the measured height, never to a guess",
+      "barHeights.put(t.taskId, plan.barPx);" in caption_service
+      and "Integer bar = barHeights.get(taskId);" in caption_service
+      and "if (bar != null && bar > 0) return bar;" in caption_service,
+      "CaptionService.captionHeight follows CaptionRule.Plan")
+
+check("caption: one inset only — the strip is made ONLY where the platform draws none",
+      "if (measured > 0) {" in rule and "p.strip = !animating && now != ourPx;" in rule
+      and "p.strip = now == 0 && !animating;" in rule
+      and "if (plan.strip) {" in caption_service
+      and "wm.post(() -> wm.unstrip(display, taskId));" in caption_service,
+      "CaptionRule.decide + CaptionService reconcile")
+
+# The trap this release was one commit away from shipping: an app-bounds override
+# REPLACES the number WMS reports, so measuring a task we have stripped reads our
+# own guess back as fact and makes a wrong height permanent.
+check("caption: our own strip can never be read back as the platform's caption",
+      "if (weStripped && now > 0) {" in rule
+      and "ourStrips.contains(t.taskId)," in caption_service
+      and "private final Set<Integer> ourStrips = new HashSet<>();" in caption_service,
+      "CaptionRule weStripped")
+
+# The geometry that produced "old on top, new underneath": our bar lives in the APP's
+# surface, the platform's caption is a surface above it, so a bar hosted on the app
+# window can only land below the platform's. On a captoned task that host is illegal.
+check("caption: no second bar is ever stacked inside the app's own window",
+      "if (task.hasPlatformCaption()) {" in caption_service
+      and "hosting on its app window" in caption_service,
+      "CaptionService.hostOnAppWindow")
+
+check("caption: an override left by an older build is released once per session",
+      "private void clearStripsOnce(List<WmClient.Task> live) {" in caption_service
+      and "clearStripsOnce(live);" in caption_service
+      and "platformCaptions.clear();" in caption_service,
+      "CaptionService.clearStripsOnce")
+
+# The fallback draws where the service cannot, and it must not fight it for one
+# task's app bounds: it makes a strip where nothing is reserved and NEVER releases
+# one, because the release bookkeeping is the service's.
+check("caption: the fallback covers the platform's caption and never fights for the strip",
+      "final int platformPx = t.platformCaption();" in launcher("CaptionFallback.java")
+      and "final int barPx = platformPx > 0 ? platformPx : px;" in launcher("CaptionFallback.java")
+      and "wm.unstrip(" not in launcher("CaptionFallback.java"),
+      "CaptionFallback.pass")
+
+# The home is the one window the user has ruled out OUR bar on, which leaves only
+# one way to get the platform's bar off it: stop it being a window at all.
+check("caption: a freeform home is replaced, whichever way it is recognised",
+      "final int baseId = live.isEmpty() ? -1 : live.get(live.size() - 1).taskId;" in caption_service
+      and "if (!ours && t.taskId != baseId) continue;" in caption_service,
+      "CaptionService.pinHome")
+
+check("diagnostics: a report names the platform's caption height and ours per task",
+      "static String describeDressing()" in caption_service
+      and "CaptionService.describeDressing()" in launcher("Diagnostics.java")
+      and ".append(\" caption=\").append(t.platformCaption())" in launcher("Diagnostics.java"),
+      "describeDressing + appendTasks")
+
+# The rule is tested by executing it, not by reading it: the test lives in the
+# repo and tools/rule-test.sh runs it with nothing but a JDK.
+rule_test = ROOT / "openandroiddex-launcher/app/src/test/java/com/ccrstech/openandroiddex/launcher/CaptionRuleTest.java"
+check("caption: the rule's test exists and covers the override trap",
+      rule_test.exists()
+      and "our own strip is released, not believed" in read(rule_test)
+      and "ALL RULE CASES PASS" in read(rule_test)
+      and (ROOT / "tools/rule-test.sh").exists(),
+      "CaptionRuleTest + tools/rule-test.sh")
+
 # ── 10. versions agree everywhere ───────────────────────────────────────────
 gradle = read(ROOT / "openandroiddex-launcher/app/build.gradle")
 pkg = read(ROOT / "open-android-dex-tauri/package.json")

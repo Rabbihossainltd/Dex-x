@@ -59,6 +59,39 @@ final class WmClient {
             return appLeft == left && appRight == right && appBottom == bottom
                     && appTop == top + px;
         }
+
+        /**
+         * How tall the platform's own caption is on this window, in px — measured from
+         * the inset WMS publishes, never guessed.
+         *
+         * <p>WHY THIS EXISTS. Since Android 14 a caption is not a window. Shell draws it
+         * as a surface child of the task ({@code TASK_CHILD_LAYER_WINDOW_DECORATIONS})
+         * and publishes a {@code captionBar} inset, which WMS turns into
+         * {@code appBounds.top > bounds.top}. That difference is the only honest answer
+         * to "how much room do I have", because the room is ALREADY RESERVED by the
+         * platform: shell pushes the app's surface down by exactly this much before we
+         * are ever consulted.
+         *
+         * <p>Which means a strip of our own on top of it insets the app TWICE. The
+         * window's content drops by the sum, the top of it hides under the platform's
+         * caption, and the part of the task the content no longer fills stays empty and
+         * black — "app er upore uthe jawa, niche kalo jaiga". And a bar built to a size
+         * that is not this one leaves the sliver it does not cover showing the
+         * platform's buttons under ours — "double caption bar, old + new". Both come
+         * from the same missing measurement; this method is that measurement.
+         *
+         * <p>Zero means the platform is drawing no caption on this task at all, and the
+         * strip is ours to make.
+         */
+        int platformCaption() {
+            int d = appTop - top;
+            return d > 0 ? d : 0;
+        }
+
+        /** Whether the platform itself is already insetting this task for a caption. */
+        boolean hasPlatformCaption() {
+            return platformCaption() > 0;
+        }
     }
 
     private final HandlerThread thread = new HandlerThread("wm-client");

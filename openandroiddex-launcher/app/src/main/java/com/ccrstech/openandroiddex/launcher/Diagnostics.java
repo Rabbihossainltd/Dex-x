@@ -116,6 +116,13 @@ final class Diagnostics {
             b.append("  threw: ").append(t).append('\n');
         }
 
+        b.append("\n-- our bars against the platform's captions --\n");
+        try {
+            b.append(CaptionService.describeDressing());
+        } catch (Throwable t) {
+            b.append("  threw: ").append(t).append('\n');
+        }
+
         b.append("\n-- caption fallback --\n");
         b.append("fallback bars on screen: ").append(CaptionFallback.barCount()).append('\n');
 
@@ -199,6 +206,14 @@ final class Diagnostics {
                     .append(" ").append(t.left).append(',').append(t.top)
                     .append(' ').append(t.right - t.left).append('x').append(t.bottom - t.top)
                     .append(" app ").append(t.appLeft).append(',').append(t.appTop)
+                    // The number this whole round turns on: how much of this task the
+                    // PLATFORM has already reserved for its own caption. Non-zero means
+                    // the space exists whether we like it or not, and our bar has to be
+                    // exactly this tall. Zero means the space is ours to make. Anything
+                    // else in a report — two bars, content sitting low, a black band
+                    // under the window — reads back to this one figure per window.
+                    .append(" caption=").append(t.platformCaption()).append("px")
+                    .append(" (").append(t.hasPlatformCaption() ? "platform" : "none").append(')')
                     .append(" ").append(t.pkg).append('/').append(t.activity).append('\n');
         }
     }

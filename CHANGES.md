@@ -128,6 +128,85 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.18 — one caption, and it is ours: measured, never doubled
+
+Three reports: *"abar check koro fix gula"*, *"double caption bar — old + new, remove the
+old from everywhere"*, and *"app upore uthe jaye, niche kalo jaiga"*.
+
+### 1. What AOSP actually does — the third round spent guessing at it
+
+`CaptionWindowDecorViewModel.shouldShowWindowDecor()`:
+
+```java
+if (taskInfo.getWindowingMode() == WINDOWING_MODE_FREEFORM) return true;   // nothing else is reached
+if (taskInfo.getWindowingMode() == WINDOWING_MODE_PINNED)   return false;
+if (taskInfo.getActivityType() != ACTIVITY_TYPE_STANDARD)   return false;
+```
+
+**Every freeform task gets a caption, and nothing a third-party app can call turns it off.**
+0.7.16 used `setShouldShowSystemDecors` (status bar / nav bar / launcher — never captions) and
+0.7.17's base-task rule only stopped us drawing a second one. So per window there are exactly
+two honest outcomes:
+
+| the window | what can happen |
+| --- | --- |
+| a fullscreen task (the home as it should be) | the platform draws nothing — nothing to remove |
+| any freeform window | the platform's caption stays; ours must occupy the same pixels |
+
+### 2. A caption is not a window any more, and that is the measurement
+
+Since Android 14 shell draws it as a surface child of the task and publishes a `captionBar`
+inset, which WMS reports as `appBounds.top > bounds.top`. The code had been measuring the
+accessibility list for a caption window that no longer exists and falling back to a blind
+40 dp. Two symptoms, one missing number:
+
+* a bar of the wrong height → the platform's own buttons showing from under ours ("double");
+* the strip (`STRIP`, an app-bounds override) reserved **on top of** space the platform had
+  already reserved → the app content pushed down by both, the rest of the task empty and
+  black ("upore uthe jaye, niche kalo").
+
+### 3. `CaptionRule` — the decision, as arithmetic that can be run
+
+The rule is a pure function in its own file with no Android dependency:
+`CaptionRule.decide(top, appTop, measured, weStripped, ourPx, animating)`. It reserves our
+strip **only** where the platform draws no caption, and otherwise builds the bar to the
+platform's measured height and holds no override of ours.
+
+**The trap the first draft of this release walked into**, and the reason the rule is a
+separate testable class: an app-bounds override *replaces* the number WMS reports. Measuring
+a task that still carries our strip therefore reads our own guess back as fact, and a wrong
+height becomes permanent — the exact class of self-sustaining bug this project keeps being
+reported for. `ourStrips` says which insets are ours; `CaptionRuleTest` drives the real file
+through the sequence and fails if the trap reopens (`bash tools/rule-test.sh`, 17 cases).
+
+### 4. Never a second bar, in the one geometry where it cannot be avoided
+
+Our bar lives inside a `SurfaceControlViewHost` reparented into its host's surface. Hosted on
+the **app's** window it starts where the app's content starts — and the platform's caption is
+a surface *above* the app's, so that host could only ever put our bar **below** the platform's:
+old on top, new underneath. That is the reported picture. So on a captoned task the app
+window is no longer a legal host: with no window above the app we draw nothing and leave the
+single platform bar, because one bar we do not own beats two.
+
+### 5. The home does not get covered — it stops being a window
+
+The one window the user has ruled out OUR bar on. `pinHome` now recognises the home both ways
+(our activity, and the bottom-most root task — the way it is recognisable while a starting
+window hides its package) and replaces a home that will not leave freeform in ~5 s instead of
+~12 s.
+
+### 6. Diagnostics
+
+Per task: `caption=<n>px (platform|none)`, and a section comparing the platform's number with
+our bar's, which strip is whose, and whether the bar came from the accessibility renderer or
+the fallback. A report now names the window and the height instead of needing a guess.
+
+### Honest gaps
+
+Nothing here is device-verified, and I cannot measure this phone from here. If a caption is
+still not ours, the report says which window and which height — paste it and the next release
+does not guess.
+
 ## v0.7.17 — whose caption is it, and the two holes that let the home wear one
 
 Two reports, and one of them is a correction of this project's own last release.

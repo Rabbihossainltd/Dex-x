@@ -513,8 +513,62 @@ public final class CaptionService extends AccessibilityService {
 
     /** taskId -> caption height actually in use, measured from the platform decor. */
     private final Map<Integer, Integer> captionHeights = new HashMap<>();
+    /**
+     * The platform's own caption height per task, in px — see WmClient.Task#platformCaption.
+     *
+     * <p>Kept apart from {@link #captionHeights} because the two answer different
+     * questions and must not overwrite each other: this map is what WMS says the space
+     * already reserved is, that one is what an accessibility window measured. The bar is
+     * built to whichever is real, and this one wins when it is non-zero.
+     */
+    private final Map<Integer, Integer> platformCaptions = new HashMap<>();
+    /**
+     * The strip WE asked for, per task — the answer to "is that inset mine or the
+     * platform's?". An app-bounds override replaces the number WMS reports, so without
+     * this an inset we made reads back as a measurement and a wrong height lasts for the
+     * rest of the session. See CaptionRule.
+     */
+    private final Set<Integer> ourStrips = new HashSet<>();
+    /** The height each task's bar is drawn at this pass, px — see CaptionRule.Plan. */
+    private final Map<Integer, Integer> barHeights = new HashMap<>();
+
+    /**
+     * For diagnostics: every task the platform has reserved caption space on, what that
+     * space measures, and what OUR bar on it measures.
+     *
+     * <p>These two numbers being equal is the whole contract of this release — equal means
+     * one bar, ours, covering the platform's edge to edge. A bar shorter than the platform's
+     * caption is the reported "double caption, old + new"; a task listed here with no bar
+     * at all is a platform caption nobody is covering.
+     */
+    static String describeDressing() {
+        CaptionService s = live;
+        if (s == null) return "  (the caption service is not bound)\n";
+        StringBuilder b = new StringBuilder();
+        for (Map.Entry<Integer, Integer> e : s.platformCaptions.entrySet()) {
+            int id = e.getKey();
+            int ours = s.captionHeight(id);
+            b.append("  task ").append(id)
+                    .append(": platform caption ").append(e.getValue()).append("px")
+                    .append(", our bar ").append(ours).append("px")
+                    .append(s.ourStrips.contains(id) ? " (strip ours)" : " (platform's space)")
+                    .append(CaptionFallback.hasBar(id) ? " (fallback)" : " (accessibility)")
+                    .append(e.getValue() == ours ? "" : "  <-- MISMATCH")
+                    .append('\n');
+        }
+        if (b.length() == 0) {
+            b.append("  (no task carries a platform caption — the strip is ours to make)\n");
+        }
+        return b.toString();
+    }
 
     private int captionHeight(int taskId) {
+        // The platform's own caption first, and exactly: if shell has already inset this
+        // task by N px then our bar must BE those N px. Anything shorter leaves the tail
+        // of the platform's caption — its own buttons — visible under ours, which is the
+        // "double caption bar" that was reported twice. Anything taller eats the app.
+        Integer bar = barHeights.get(taskId);
+        if (bar != null && bar > 0) return bar;
         Integer h = captionHeights.get(taskId);
         return h == null ? px(CAPTION_DP) : h;
     }
@@ -891,6 +945,14 @@ public final class CaptionService extends AccessibilityService {
                     if (display != desktopDisplayId) {
                         trace("desktop display = " + display);
                         desktopDisplayId = display;
+                        // A strip left by an EARLIER BUILD is in this display's app bounds
+                        // and cannot be attributed: `ourStrips` starts empty in every new
+                        // process, so an 80 px override from 0.7.17 would read as a
+                        // measurement of the platform's caption and hold that height for
+                        // good. Release them all once, here — the state after this is
+                        // "nothing reserved by anybody but the platform", which is the one
+                        // state the measurement can be trusted in.
+                        clearStripsOnce(live);
                         dropAnchor();               // the anchor belongs to the old display
                         hostWaitSince.clear();      // those task ids are on the old display
                         hostDisplays.clear();
@@ -1155,18 +1217,52 @@ public final class CaptionService extends AccessibilityService {
      * the task still reads as freeform, and asking on every 60 ms poll would spend the
      * session in transactions.
      */
+    /**
+     * Release every app-bounds override on the desktop display, once per session, and
+     * forget every measurement with it.
+     *
+     * <p>Only ever at the start: a strip is released here because its origin is unknowable
+     * (an older build's, or our own from before this process existed), and the pass after
+     * it reads the platform's true inset off a task nobody has touched. Doing this later
+     * would be a visible re-inset on a live window for no reason.
+     */
+    private void clearStripsOnce(List<WmClient.Task> live) {
+        if (live == null) return;
+        int n = 0;
+        for (WmClient.Task t : live) {
+            if (!t.isFreeform() || t.appTop == t.top) continue;
+            final int taskId = t.taskId;
+            wm.post(() -> wm.unstrip(desktopDisplayId, taskId));
+            n++;
+        }
+        platformCaptions.clear();
+        ourStrips.clear();
+        barHeights.clear();
+        if (n > 0) trace("released " + n + " strip(s) left in this display's tasks");
+    }
+
     private void pinHome(int display, List<WmClient.Task> live) {
         if (live == null || wm == null) return;
         long now = SystemClock.uptimeMillis();
+        // The home is recognised BOTH ways here, because the platform draws a caption on
+        // every freeform task — shell's shouldShowWindowDecor answers true for freeform
+        // before it looks at the package, the activity type or the display — and a
+        // freeform home therefore wears a caption with its own close and maximise that no
+        // flag and no permission removes. It does not have to be COVERED: it has to stop
+        // being a window. The bottom-most root task of the display is the home even while
+        // a starting window hides its package, which is exactly when the package test
+        // fails, so both tests are kept.
+        final int baseId = live.isEmpty() ? -1 : live.get(live.size() - 1).taskId;
         for (WmClient.Task t : live) {
-            if (!getPackageName().equals(t.pkg) || !isDesktopActivity(t.activity)) continue;
+            boolean ours = getPackageName().equals(t.pkg) && isDesktopActivity(t.activity);
+            if (!ours && t.taskId != baseId) continue;
             if (!t.isFreeform()) {
                 homesUnfloated.remove(t.taskId);
                 homeUnfloatTries.remove(t.taskId);
                 continue;
             }
             Long asked = homesUnfloated.get(t.taskId);
-            if (asked != null && now - asked < 4000) continue;
+            if (asked != null && now - asked < 1500) continue;
             android.graphics.Point size = displaySize(display);
             int tries = homeUnfloatTries.merge(t.taskId, 1, Integer::sum);
             // Three passes and still a window: this release will not take the task out of
@@ -1178,7 +1274,7 @@ public final class CaptionService extends AccessibilityService {
             // bar that cannot be removed by anything this process is allowed to call.
             if (tries >= 3) {
                 homeUnfloatTries.remove(t.taskId);
-                if (now - homesRestartedAt > 30_000) {
+                if (now - homesRestartedAt > 20_000) {
                     homesRestartedAt = now;
                     DexLog.step("desktop", "the desktop's home stayed a freeform window"
                             + " (task " + t.taskId + ", mode " + t.windowingMode
@@ -1312,6 +1408,15 @@ public final class CaptionService extends AccessibilityService {
         // the one caller that has to put windows back in the order it found
         // them.
         lastStack = stack;
+        // Forget tasks that are gone: a reused task id must be measured again rather than
+        // inherit the height of whatever wore that number before it.
+        if (platformCaptions.size() > stack.size() + 4) {
+            Set<Integer> alive = new HashSet<>();
+            for (WmClient.Task t : stack) alive.add(t.taskId);
+            platformCaptions.keySet().retainAll(alive);
+            barHeights.keySet().retainAll(alive);
+            ourStrips.retainAll(alive);
+        }
         for (WmClient.Task t : stack) {
             if (t.pkg != null) desktopPkgs.add(t.pkg);
         }
@@ -1422,18 +1527,49 @@ public final class CaptionService extends AccessibilityService {
                 unhostedSince.remove(t.taskId);
             }
             if (host != null) captionHeights.put(t.taskId, measureCaption(host));
-            final int px = captionHeight(t.taskId);
-            // Reserve — or RE-reserve — the strip. The app-bounds override does not follow
-            // a task that moves, so this also repairs a stale one after a drag or resize.
+            // ── ONE inset, never two ──────────────────────────────────────────
             //
-            // Not while it is collapsing: animateOut is moving the task itself eight
-            // times in 160 ms, and re-stripping on every pass of that would re-inset the
-            // app against a rect that has already changed again — the bar flickers and
-            // the content jumps. The leave-action follows the collapse, so nothing needs
-            // the strip after it.
-            if (!animating.contains(t.taskId) && !t.hasStrip(px)) {
+            // See WmClient.Task#platformCaption: when the platform's caption exists,
+            // shell has already pushed this app's surface down by its height, and the
+            // space our bar belongs in is exactly that. Two things follow, and both
+            // are measured rather than assumed:
+            //
+            //   * the bar is built to the platform's height, so it covers that strip
+            //     edge to edge and its own buttons can never show beneath ours;
+            //   * we reserve NOTHING extra. A strip on top of the platform's inset is
+            //     the content that sat too low with an empty black band under it.
+            //
+            // A task with no platform caption is the other case: nothing reserved,
+            // nothing to cover, so the strip is ours and it stays 40 dp.
+            // The whole decision lives in CaptionRule, where it can be tested without a
+            // phone: one inset, either the platform's or ours, never both. `weStripped`
+            // is what keeps our own override from being read back as a measurement of
+            // the platform's caption — see that class for why that trap matters.
+            final CaptionRule.Plan plan = CaptionRule.decide(t.top, t.appTop,
+                    platformCaptions.get(t.taskId),
+                    ourStrips.contains(t.taskId),
+                    px(CAPTION_DP),
+                    animating.contains(t.taskId));
+            if (plan.remember) platformCaptions.put(t.taskId, plan.platformPx);
+            barHeights.put(t.taskId, plan.barPx);
+            if (plan.unstrip) {
+                ourStrips.remove(t.taskId);
                 final int taskId = t.taskId;
-                wm.post(() -> wm.strip(display, taskId, px));
+                wm.post(() -> wm.unstrip(display, taskId));
+            }
+            // Reserve the strip — but only on a task the platform draws no caption on.
+            // The app-bounds override does not follow a task that moves, so this also
+            // repairs a stale one after a drag or resize.
+            //
+            // Never while it is collapsing: animateOut is moving the task itself eight
+            // times in 160 ms, and re-insetting the app against a rect that has already
+            // changed again makes the bar flicker and the content jump. The leave-action
+            // follows the collapse, so nothing needs the strip after it.
+            if (plan.strip) {
+                ourStrips.add(t.taskId);
+                final int taskId = t.taskId;
+                final int stripPx = plan.barPx;
+                wm.post(() -> wm.strip(display, taskId, stripPx));
             }
             // Title and size first, and without needing the host — a window resized on a
             // pass where the host is missing must still get a correctly sized bar.
@@ -1788,6 +1924,27 @@ public final class CaptionService extends AccessibilityService {
         // second. Measured doing exactly that before this guard: 231 -> 233 -> 231 in nine
         // seconds. Keeping the bar it has is what the null-host path already does.
         if (captions.get(task.taskId) != null) return null;
+        // ── never a SECOND bar, in the one geometry where it cannot be avoided ──
+        //
+        // A bar of ours is drawn inside a SurfaceControlViewHost that is reparented into
+        // its host's surface. Hosted on the APP's window, it therefore starts where the
+        // app's content starts — and since Android 14 the platform's caption is a surface
+        // child ABOVE the app's, so our bar could only ever appear BELOW the platform's:
+        // one bar over another, old on top, new underneath, and the window's content
+        // pushed down by the pair. That is the reported picture, exactly.
+        //
+        // So on a task the platform is captoning, the app window is not a legal host. If
+        // there is no window above the app to host on, we draw nothing and the window
+        // keeps the platform's single bar until one appears. One bar we do not own beats
+        // two bars on every count, and this is the rule that makes two impossible.
+        if (task.hasPlatformCaption()) {
+            if (hostWaitSince.put(task.taskId, SystemClock.uptimeMillis()) == null) {
+                trace("task " + task.taskId + ": the platform's own caption is on this"
+                        + " window (" + task.platformCaption() + "px) and no host above it"
+                        + " — not stacking a second bar inside the app");
+            }
+            return null;
+        }
         long now = SystemClock.uptimeMillis();
         boolean captionless = captionless(task.displayId);
         Long since = hostWaitSince.get(task.taskId);
