@@ -48,8 +48,8 @@ index 2604257..be83067 100644
 +        // The gate belongs to THIS request, not to the last one: a marker left behind by a
 +        // session that died between its start and its draw would otherwise open the next
 +        // splash onto exactly the foreign screen this exists to hide.
-+        File canOpen = new File(CAN_OPEN);
-+        if (canOpen.exists() && !canOpen.delete()) {
++        File marker = new File(CAN_OPEN);
++        if (marker.exists() && !marker.delete()) {
 +            Ln.w("Desktop splash: could not remove " + CAN_OPEN);
 +        }
 +        canOpen = false;
