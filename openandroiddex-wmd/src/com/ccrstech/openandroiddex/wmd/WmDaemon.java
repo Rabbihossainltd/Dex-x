@@ -392,6 +392,55 @@ public final class WmDaemon {
                 return;
             }
 
+            case "HAS": {
+                // "HAS <taskId>" — is that task still there, anywhere on the phone?
+                //
+                // The launcher asks this before it forgets a minimised window. Its own
+                // polling list is one display's ROOT tasks, and a hidden task can drop
+                // out of that list the pass after it is hidden — which read as "closed
+                // while minimised" and took the app off the taskbar. "OK 1" means open
+                // (hidden or not), "OK 0" means the task is really gone.
+                out.println(Wm.taskExists(i(a, 1)) ? "OK 1" : "OK 0");
+                return;
+            }
+
+            case "DECORS": {
+                // "DECORS <displayId> <0|1>" — allow or refuse the platform's own window
+                // decorations (its caption) on a display; answers with what it WAS.
+                //
+                // This is the layer every previous attempt at "the home has a caption"
+                // and "the app sits too high with black below" missed. The desktop
+                // display runs DesktopModeWindowDecorViewModel, which draws a caption
+                // for every task on it — the home's included — and publishes a caption
+                // inset of its own. Our own caption is drawn on top of it, and our strip
+                // insets the app a second time, so an app's content ends up a whole
+                // caption taller than the window in total: the top of it under two bars
+                // and its bottom edge short of its frame, which is the black band.
+                // The virtual display is created without
+                // SHOULD_SHOW_SYSTEM_DECORATIONS (scrcpy --no-vd-system-decorations),
+                // which this phone's decoration model ignores; this switch is the one
+                // that is honoured, and uid 2000 holds INTERNAL_SYSTEM_WINDOW for it.
+                int d = a.length > 1 ? i(a, 1) : displayFromDump(LAUNCHER);
+                if (d < 0) {
+                    out.println("ERR no desktop display");
+                    return;
+                }
+                if (a.length < 3) {
+                    // Read-only form: what is it NOW? (Diagnostics asks this.)
+                    out.println("OK " + (Wm.shouldShowSystemDecors(d) ? 1 : 0));
+                    return;
+                }
+                boolean on = "1".equals(a[2]) || "on".equals(a[2]) || "true".equals(a[2]);
+                try {
+                    boolean was = Wm.shouldShowSystemDecors(d);
+                    if (was != on) Wm.setShouldShowSystemDecors(d, on);
+                    out.println("OK " + (was ? 1 : 0));
+                } catch (Throwable e) {
+                    out.println("ERR " + e);
+                }
+                return;
+            }
+
             case "CLOSETOP": {
                 // "CLOSETOP [displayId]" — close the front-most app window, launcher
                 // excepted: it is the desktop itself, and removing it leaves a black

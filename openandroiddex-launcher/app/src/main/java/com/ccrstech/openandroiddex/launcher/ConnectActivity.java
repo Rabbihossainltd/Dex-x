@@ -371,8 +371,50 @@ public class ConnectActivity extends android.app.Activity {
             // Into the on-disk log as well: the same text survives the dialog,
             // so `adb pull .../files/dex-x.log` works when copying is awkward.
             DexLog.dump("diag", text);
+            // …and into Downloads as a file, because a bug report is only useful if it
+            // can leave the phone. Copying a 300-line dialog on a phone is not something
+            // anyone should have to do.
+            saveDiagnostics(text);
             runOnUiThread(() -> showDiagnosticsReport(text));
         }, "diagnostics").start();
+    }
+
+    /**
+     * Write the report to Downloads/Dex-X-diagnostics.txt.
+     *
+     * <p>MediaStore, so no storage permission is involved and the file is where a person
+     * would look for it — Attach on an email or a chat finds it without a file manager.
+     * Every failure is silent: the dialog and the app's own log still carry the text.
+     */
+    private void saveDiagnostics(String text) {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                android.content.ContentValues v = new android.content.ContentValues();
+                v.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "Dex-X-diagnostics.txt");
+                v.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/plain");
+                v.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                        android.os.Environment.DIRECTORY_DOWNLOADS);
+                android.net.Uri uri = getContentResolver().insert(
+                        android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
+                if (uri != null) {
+                    java.io.OutputStream os = getContentResolver().openOutputStream(uri, "wt");
+                    if (os != null) {
+                        os.write(text.getBytes("UTF-8"));
+                        os.close();
+                    }
+                    DexLog.step("diag", "report written to Downloads/Dex-X-diagnostics.txt");
+                    return;
+                }
+            }
+            java.io.File dir = getExternalFilesDir(null);
+            java.io.File out = new java.io.File(dir, "Dex-X-diagnostics.txt");
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(out);
+            fos.write(text.getBytes("UTF-8"));
+            fos.close();
+            DexLog.step("diag", "report written to " + out.getAbsolutePath());
+        } catch (Throwable t) {
+            DexLog.warn("diag", "could not write the report to a file", t);
+        }
     }
 
     private void showDiagnosticsReport(String text) {

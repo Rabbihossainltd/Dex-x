@@ -358,6 +358,42 @@ final class WmClient {
     }
 
     /**
+     * Does task {@code taskId} still exist, anywhere on the phone — hidden or not?
+     *
+     * The list this service polls is one display's ROOT tasks, and a task hidden with
+     * setHidden drops out of it on several phones the very pass after it is hidden. That
+     * reading is "closed", which is how a minimised window left the taskbar; this is the
+     * question that can tell the two apart. Null when the daemon is not answering, which
+     * callers must treat as "unknown", never as "gone".
+     */
+    Boolean has(int taskId) {
+        String reply = request("HAS " + taskId);
+        if (!ok(reply)) return null;
+        return reply.trim().endsWith("1");
+    }
+
+    /**
+     * Allow (on) or refuse (off) the platform's own window decorations on a display.
+     *
+     * Returns what the display was set to BEFORE this call — {@code null} when the daemon
+     * is away or the platform has no such switch. This is the call that removes the
+     * phone's own title bar from the desktop's home and stops it insetting every app's
+     * content a second time; see WmDaemon's DECORS.
+     */
+    Boolean decors(int displayId, Boolean on) {
+        String reply = request("DECORS " + displayId + (on == null ? "" : " " + (on ? "1" : "0")));
+        if (!ok(reply)) return null;
+        String was = reply.substring(2).trim();
+        if (was.isEmpty()) return null;
+        return "1".equals(was);
+    }
+
+    /** What the platform's own decorations are set to on a display; null when unknown. */
+    Boolean decors(int displayId) {
+        return decors(displayId, null);
+    }
+
+    /**
      * Take the task out of a freeform window and fill {@code displayId} with it.
      *
      * The one task this is for is the desktop's own launcher: it must never be a

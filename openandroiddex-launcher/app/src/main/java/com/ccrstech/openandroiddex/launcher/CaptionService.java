@@ -1046,6 +1046,51 @@ public final class CaptionService extends AccessibilityService {
      * the user's is lost. We only ever remove one whose package IS the current
      * HOME package and is not ours — never a package the user opened.
      */
+    /** Tasks mid-collapse (see animateOut): the reconcile leaves their geometry alone. */
+    private final Set<Integer> animating = new HashSet<>();
+
+    /** When the platform's decorations were last known to be off on the desktop display. */
+    private long decorsCheckedAt;
+
+    /**
+     * Take the phone's own window decoration off the desktop display.
+     *
+     * <p>The desktop display is a PUBLIC virtual display running the platform's desktop
+     * decoration model: it draws a caption for every task on it — the launcher's own home
+     * included — and publishes a caption inset that shrinks each app's content. Our
+     * captions are drawn over the platform's, and our strip insets the app again, so a
+     * window ends up with two captions' worth of inset and one caption drawn: the top of
+     * the app is under both and the bottom of the frame is empty. That is the "close
+     * minimize button on the home" and the "app sits high, black below" pair, and no
+     * amount of caption suppression in THIS process could remove the platform's own bar.
+     *
+     * <p>scrcpy creates the display without SHOULD_SHOW_SYSTEM_DECORATIONS
+     * ({@code --no-vd-system-decorations}); this phone's decoration model does not read
+     * that flag. {@code Wm.setShouldShowSystemDecors} is the switch it does read, and
+     * uid 2000 (the daemon) holds the permission for it.
+     *
+     * <p>Re-asserted every ~10 s rather than once: the display is recreated whenever the
+     * session is, and a phone that drops the setting on a config change would otherwise
+     * bring the bar back mid-session with nothing in the log to show for it.
+     */
+    private void ensurePlatformCaptionsOff(int display) {
+        if (wm == null) return;
+        long now = SystemClock.uptimeMillis();
+        if (decorsCheckedAt != 0 && now - decorsCheckedAt < 10_000) return;
+        decorsCheckedAt = now;
+        final int d = display;
+        wm.post(() -> {
+            Boolean was = wm.decors(d, false);
+            if (was == null) {
+                trace("the platform's decoration switch is not available on this phone");
+            } else if (was) {
+                DexLog.step("desktop", "the platform's own title bar was on display " + d
+                        + " — turned it off (it was drawing the home's caption and insetting"
+                        + " every app a second time)");
+            }
+        });
+    }
+
     /** Task id → when it was last asked to leave its freeform window (see pinHome). */
     private final Map<Integer, Long> homesUnfloated = new HashMap<>();
 
@@ -1143,6 +1188,13 @@ public final class CaptionService extends AccessibilityService {
 
     private boolean applyTasks(int display, List<WmClient.Task> live) {
         trackDensity(display);
+        // Before anything is measured or dressed: the platform's own caption must be off
+        // this display. It draws a title bar for the home (the "home e ekhono caption bar"
+        // report) and insets every app's content by a caption of its own, on top of the
+        // strip this service reserves — two insets, one window: the app's content sits a
+        // caption lower than it should and its bottom edge stops short of its frame,
+        // which is the black band under it. See WmDaemon's DECORS.
+        ensurePlatformCaptionsOff(display);
         // The desktop's own launcher must never be a window — see pinHome. Every
         // pass, because the whole start is a race and a freeform home is what the
         // user sees for as long as this takes to notice.
@@ -1186,7 +1238,9 @@ public final class CaptionService extends AccessibilityService {
         // The front-most window gets real edges to pull. One window only: an
         // overlay is above every app, so a band belonging to a window that is
         // behind another would swallow clicks meant for the one on top.
-        syncEdgeResize(stack.isEmpty() ? null : stack.get(0), live);
+        WmClient.Task front = stack.isEmpty() ? null : stack.get(0);
+        if (front != null && animating.contains(front.taskId)) front = null;
+        syncEdgeResize(front, live);
         // Every ~2 s: an app that was launched here and is now open on the PHONE
         // has to be given the phone's screen back. Cheap (one LIST on another
         // display, ~2.5 ms) and done on this poll rather than its own thread.
@@ -1218,10 +1272,23 @@ public final class CaptionService extends AccessibilityService {
                 Min m = e.getValue();
                 WmClient.Task t = byId(live, e.getKey());
                 if (t == null) {
-                    it.remove();                       // closed while it was minimised
-                    changed = true;
+                    // Absent from this display's ROOT list — which is NOT the same as
+                    // closed. A task hidden with setHidden drops out of that list on
+                    // several phones (it is how a minimised window's tile vanished a
+                    // pass after the minimise, and stayed vanished), so the first
+                    // reading only starts a clock. After GRACE_FORGET_MS the daemon is
+                    // asked, once, whether the task exists at all: "OK 0" is a closed
+                    // window and only then does the taskbar drop it.
+                    if (m.goneSince == 0) {
+                        m.goneSince = now;
+                    } else if (now - m.goneSince > GRACE_FORGET_MS
+                            && now - m.askedAt > GRACE_FORGET_MS) {
+                        m.askedAt = now;
+                        askGone(e.getKey());
+                    }
                 } else if (!t.visible) {
                     m.hidden = true;                   // the hide landed; now it can be undone
+                    m.goneSince = 0;
                 } else if (m.hidden || now - m.since > HIDE_GRACE_MS) {
                     it.remove();                       // restored — or the hide never took
                     changed = true;
@@ -1278,7 +1345,13 @@ public final class CaptionService extends AccessibilityService {
             final int px = captionHeight(t.taskId);
             // Reserve — or RE-reserve — the strip. The app-bounds override does not follow
             // a task that moves, so this also repairs a stale one after a drag or resize.
-            if (!t.hasStrip(px)) {
+            //
+            // Not while it is collapsing: animateOut is moving the task itself eight
+            // times in 160 ms, and re-stripping on every pass of that would re-inset the
+            // app against a rect that has already changed again — the bar flickers and
+            // the content jumps. The leave-action follows the collapse, so nothing needs
+            // the strip after it.
+            if (!animating.contains(t.taskId) && !t.hasStrip(px)) {
                 final int taskId = t.taskId;
                 wm.post(() -> wm.strip(display, taskId, px));
             }
@@ -2634,10 +2707,78 @@ public final class CaptionService extends AccessibilityService {
         if (getPackageName().equals(task.pkg) && OwnWindows.askToClose(this, id, task.activity)) {
             return;
         }
-        wm.post(() -> {
+        // Toward the ✕ that was pressed, which is where a Windows window goes.
+        animateOut(task, closedRect(task), () -> wm.post(() -> {
             wm.unstrip(display, id);
             wm.close(id);
-        });
+        }));
+    }
+
+    /**
+     * A window on its way out: close and minimise both collapse it first.
+     *
+     * <p>Ours used to stop existing on the frame the button was released — the "add an
+     * animation" report. There is nothing here to fade: the window is a task on the
+     * phone and its pixels are the app's, so the one thing this process can animate is
+     * its RECT. Eight steps of 20 ms through {@code wm.bounds} (applyTransaction — the
+     * unanimated path a drag already uses) is a believable collapse, with no screenshot,
+     * no extra process and no platform transition to fight.
+     *
+     * <p>While it runs the task id is in {@link #animating}, which keeps the reconcile
+     * from re-stripping a shrinking window (the caption bar would flash) and keeps the
+     * edge bands off it. The action itself — hide or close — runs at the end, so a
+     * window that is being animated out is still open until it has finished moving.
+     */
+    private void animateOut(final WmClient.Task task, final int[] to, final Runnable done) {
+        final int display = task.displayId;
+        final int id = task.taskId;
+        final int[] from = {task.left, task.top, task.right, task.bottom};
+        if (from[2] - from[0] < 8 || from[3] - from[1] < 8) {
+            done.run();                       // nothing worth animating; do not delay the act
+            return;
+        }
+        animating.add(id);
+        stepOut(display, id, from, to, 0, done);
+    }
+
+    /** Eight frames, 20 ms apart: 160 ms of collapse, eased out. */
+    private static final int ANIM_STEPS = 8;
+    private static final long ANIM_MS = 20;
+
+    /** One frame of {@link #animateOut}. */
+    private void stepOut(final int display, final int id, final int[] from, final int[] to,
+                         final int step, final Runnable done) {
+        if (step >= ANIM_STEPS) {
+            animating.remove(id);
+            done.run();
+            return;
+        }
+        float u = (step + 1f) / ANIM_STEPS;
+        float t = 1f - (1f - u) * (1f - u) * (1f - u);      // ease-out cubic
+        final int l = Math.round(from[0] + (to[0] - from[0]) * t);
+        final int top = Math.round(from[1] + (to[1] - from[1]) * t);
+        final int r = Math.round(from[2] + (to[2] - from[2]) * t);
+        final int b = Math.round(from[3] + (to[3] - from[3]) * t);
+        wm.post(() -> wm.bounds(display, id, l, top, Math.max(l + 8, r), Math.max(top + 8, b)));
+        main.postDelayed(() -> stepOut(display, id, from, to, step + 1, done), ANIM_MS);
+    }
+
+    /** Where the ✕ is: a small rect at the caption's right end. */
+    private int[] closedRect(WmClient.Task t) {
+        int w = Math.max(24, px(48));
+        int x = t.right - w;
+        int y = t.top;
+        return new int[]{x, y, t.right, Math.min(t.bottom, y + w)};
+    }
+
+    /** Where a minimised window goes: down onto the taskbar, at the middle of it. */
+    private int[] minimisedRect(WmClient.Task t) {
+        final android.graphics.Point size = displaySize(t.displayId);
+        int cx = size.x / 2;
+        int w = Math.max(24, px(56));
+        int bottom = size.y;
+        int top = Math.max(t.top + px(8), bottom - px(28));
+        return new int[]{cx - w, top, cx + w, bottom};
     }
 
     /**
@@ -2913,7 +3054,34 @@ public final class CaptionService extends AccessibilityService {
         final int id = task.taskId;
         minimised.put(id, new Min(task.pkg, task.activity, display, SystemClock.uptimeMillis()));
         publishMinimised();
-        wm.post(() -> wm.hide(display, id));
+        // Down onto the taskbar, then away — see animateOut for why the rect is the only
+        // thing this side can animate.
+        animateOut(task, minimisedRect(task), () -> wm.post(() -> wm.hide(display, id)));
+    }
+
+    /** How long a task must be missing from the polled list before the daemon is asked. */
+    private static final long GRACE_FORGET_MS = 2_500;
+
+    /**
+     * "It was not in this pass's list": ask the daemon whether it still exists, and only
+     * drop it from the taskbar if it does not.
+     *
+     * <p>Off the reconcile thread on purpose — the daemon answers over a socket, and the
+     * reconcile runs on the main looper. The answer comes back to the main looper, where
+     * {@code minimised} and the taskbar's set live.
+     */
+    private void askGone(final int taskId) {
+        if (wm == null) return;
+        wm.post(() -> {
+            final Boolean alive = wm.has(taskId);
+            main.post(() -> {
+                if (alive == null || alive) return;   // unknown is not gone
+                Min m = minimised.remove(taskId);
+                if (m == null) return;
+                DexLog.step("minimise", "task " + taskId + " (" + m.pkg + ") was closed while minimised");
+                publishMinimised();
+            });
+        });
     }
 
     /** One window we minimised: what to pin in the taskbar, and how far the hide has got. */
@@ -2931,6 +3099,10 @@ public final class CaptionService extends AccessibilityService {
         final long since;
         /** Set once the task has actually been observed hidden. */
         boolean hidden;
+        /** When the polled list first stopped carrying it — 0 while it is there. */
+        long goneSince;
+        /** When the daemon was last asked whether it still exists. */
+        long askedAt;
         /**
          * Where in the stack this window was when it went away, 0 = topmost.
          *

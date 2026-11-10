@@ -52,6 +52,9 @@ final class Diagnostics {
         b.append("caption problem(): ")
                 .append(String.valueOf(CaptionService.problem())).append('\n');
 
+        b.append("\n-- prefs that decide behaviour --\n");
+        b.append("pointer mode: ").append(DexPrefs.mouseMode(ctx)).append('\n');
+
         WmClient wm = new WmClient();
         b.append("\n-- window daemon (wmd) --\n");
         boolean up = false;
@@ -60,6 +63,15 @@ final class Diagnostics {
             b.append("PING: ").append(up ? "OK" : "NO ANSWER").append('\n');
             int desk = wm.desktopDisplay();
             b.append("desktop display: ").append(desk).append('\n');
+            if (desk >= 0) {
+                // The platform's own caption on this display: the one that draws a title
+                // bar over the home and insets every app a second time. 1 here means the
+                // switch could not be turned off — a fact no screenshot can show.
+                Boolean dec = wm.decors(desk, null);
+                b.append("platform captions on desktop display: ")
+                        .append(dec == null ? "unknown" : (dec ? "ON (switch refused?)" : "off"))
+                        .append('\n');
+            }
         } catch (Throwable t) {
             b.append("PING threw: ").append(t).append('\n');
         }

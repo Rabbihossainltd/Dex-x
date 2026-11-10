@@ -128,6 +128,82 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.16 — the platform's own caption, a minimised window that came back, and the first animation
+
+Five reports. The first three are one cause each, and the third one had never been named
+correctly in four rounds of guessing at it.
+
+### 1 + 3. "Home still has a caption bar" and "the app sits high with black below"
+
+**The platform's own window decoration.** The desktop display runs the platform's desktop
+decoration model, which draws a caption for EVERY task on it — the launcher's own home
+included — and publishes a caption *inset* that shrinks each app's content. Everything
+this project did until now was about OUR bar: the accessibility caption, the fallback
+caption, `isDesktopActivity`, the delete-the-nav-builders round. None of it could touch
+the platform's own strip, so:
+
+* the home wore a title bar with minimise/maximise/close from the platform, not from us;
+* every app was inset twice — once by the platform's caption inset, once by our strip —
+  so its content started a caption lower than it should (the top under two bars) and its
+  frame ran a caption past its bottom edge, which is the black band.
+
+The switch that owns this is `Wm.setShouldShowSystemDecors`, which the window daemon may
+call because it runs at uid 2000 with INTERNAL_SYSTEM_WINDOW. New `DECORS` verb, new
+`WmClient.decors`, and `CaptionService.ensurePlatformCaptionsOff` — asserted every ~10 s,
+because the display is recreated with every session, and the change is logged with what
+the setting was before. `--no-vd-system-decorations` (which scrcpy already passes) is
+not honoured by this phone's decoration model; this is not a duplicate of it.
+
+### 2. "A minimised app is not in the taskbar any more"
+
+0.7.13's fix made `openPkgs()` include the minimised set, so a hidden window should have
+stayed on the bar. It did not, because `CaptionService` also had this in its reconcile:
+
+```java
+if (t == null) { it.remove();   // closed while it was minimised
+```
+
+`t == null` means "not in this pass's list", and the list is the display's ROOT tasks —
+which a task hidden with `setHidden(true)` drops out of on several phones. So the
+minimised entry was deleted a poll after it was created, the taskbar lost the app on the
+very next broadcast, and there was no way back to it. Now a missing task only starts a
+clock; after 2.5 s the daemon is asked once (`HAS <taskId>`, over every task on the
+phone), and only "OK 0" — genuinely gone — removes it.
+
+### 5. Close and minimise move now
+
+There is nothing in this process to fade: the window is a task on the phone and its
+pixels belong to the app. What we own is its RECT, so that is what moves — eight frames
+of 20 ms through the unanimated `bounds` path a drag already uses, eased out. Close
+collapses toward the ✕ that was pressed; minimise collapses down onto the taskbar. The
+reconcile leaves the geometry of a collapsing window alone (no re-strip mid-animation,
+no edge bands on it), and the window's real action — hide or close — happens when the
+collapse finishes.
+
+### 4. The cursor, answered
+
+Reported twice as "the cursor does not change shape". It cannot, in the mode the desktop
+uses, and that is a choice this project already made with the same question answered two
+releases ago: scrcpy's `sdk` mode injects events *below* the pointer layer, so the
+computer's own pointer is what is on screen — Windows' arrow, one for one, free to leave
+the window — and no pointer the phone would have drawn exists to change shape. The
+alternative (`uhid`) does change shape, because the phone draws it, and it is also
+captured, relative and Android-styled. Asked, and answered: **keep the computer's arrow**.
+So the shape not changing is now documented behaviour rather than a bug to chase, and
+Settings → Mouse & cursor keeps the one-tap switch for anyone who wants the other trade.
+
+### 6. A report that can leave the phone
+
+Connect → Diagnostics now also writes `Downloads/Dex-X-diagnostics.txt` (MediaStore, no
+storage permission involved) with the pointer mode, the platform-caption state, the task
+list with bounds and app bounds, and the launcher's own log. A screenshot of a symptom
+cannot say whether the caption switch was refused; that file can.
+
+### Checks
+
+`python3 tools/audit.py` — **42/42**: three new ones pin this round (decors wired end to
+end, the `HAS` retention path, both collapse animations).
+
 ## v0.7.15 — the desktop's own home, the phone's home screen, and a setting nobody chose
 
 Four reports. Three of them share a cause that has been in the code since the desktop was,

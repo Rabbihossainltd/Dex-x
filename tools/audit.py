@@ -242,6 +242,32 @@ check("nav: the taskbar's band is excluded from the system's gestures",
       and "excludeBottomGestures(v);" in launcher_activity,
       "LauncherActivity.excludeBottomGestures")
 
+# ── 9b. the platform's caption is off the desktop display ───────────────────
+#
+# "home e ekhono caption bar roye geche" and "app open korle ektu upore uthe thake,
+# niche kalo": both are the platform's own window decoration, which draws a title bar
+# for every task (the home's included) and publishes a caption inset of its own — on
+# top of the strip this launcher reserves. It is switched off through the daemon.
+check("caption: the platform's own decoration is switched off on the desktop display",
+      'case "DECORS":' in daemon and "setShouldShowSystemDecors" in daemon
+      and 'request("DECORS ' in launcher("WmClient.java")
+      and "ensurePlatformCaptionsOff(display);" in caption_service
+      and "wm.decors(d, false)" in caption_service,
+      "WmDaemon DECORS + WmClient.decors + CaptionService.ensurePlatformCaptionsOff")
+
+# ── 9c. a minimised window stays, and comes back ────────────────────────────
+check("minimise: a task missing from the polled list is checked before it is forgotten",
+      'case "HAS":' in daemon and "taskExists(" in daemon
+      and "Boolean has(int taskId)" in launcher("WmClient.java")
+      and "askGone(e.getKey());" in caption_service,
+      "WmDaemon HAS + WmClient.has + CaptionService.askGone")
+
+check("minimise: closing and minimising collapse the window first",
+      "animateOut(task, closedRect(task)" in caption_service
+      and "animateOut(task, minimisedRect(task)" in caption_service
+      and "animating.add(id);" in caption_service,
+      "CaptionService.animateOut")
+
 # ── 10. versions agree everywhere ───────────────────────────────────────────
 gradle = read(ROOT / "openandroiddex-launcher/app/build.gradle")
 pkg = read(ROOT / "open-android-dex-tauri/package.json")

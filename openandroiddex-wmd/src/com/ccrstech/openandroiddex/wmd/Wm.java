@@ -252,6 +252,39 @@ final class Wm {
         return -1;
     }
 
+    /**
+     * Does task {@code taskId} still exist, on ANY display — hidden or not?
+     *
+     * <p>Asked by the launcher before it forgets a minimised window. The list it polls
+     * ({@link #tasksOnDisplay}) is built from one display's root tasks, and a task hidden
+     * with {@code setHidden(true)} is not always in it any more: on several phones the
+     * very next poll after a minimise answers without the task, which the launcher read
+     * as "closed while it was minimised" and dropped it from the taskbar. A window that
+     * is open should stay on the taskbar, so "is it gone" is asked of every task on the
+     * phone rather than of one display's root list.
+     *
+     * <p>Android 12+ answers from {@code getAllRootTaskInfos()}; anything older, which has
+     * no such call, from {@code getTasks}. Neither is on the hot path — the launcher asks
+     * at most once per grace window per minimised task.
+     */
+    static boolean taskExists(int taskId) {
+        try {
+            for (TaskRec t : allTasks()) {
+                if (t.taskId == taskId) return true;
+            }
+            return false;
+        } catch (Throwable ignored) {
+            // Android 11: no getAllRootTaskInfos. Fall through to getTasks.
+        }
+        try {
+            for (TaskRec t : runningTasks()) {
+                if (t.taskId == taskId) return true;
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
+
     private static TaskRec read(Object info) {
         TaskRec t = new TaskRec();
         t.info = info;
