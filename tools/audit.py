@@ -359,7 +359,7 @@ check("caption: an override left by an older build is released once per session"
 # task's app bounds: it makes a strip where nothing is reserved and NEVER releases
 # one, because the release bookkeeping is the service's.
 check("caption: the fallback covers the platform's caption and never fights for the strip",
-      "final int platformPx = t.platformCaption();" in launcher("CaptionFallback.java")
+      "final int platformPx = Math.max(t.platformCaption()," in launcher("CaptionFallback.java")
       and "final int barPx = platformPx > 0 ? platformPx : px;" in launcher("CaptionFallback.java")
       and "wm.unstrip(" not in launcher("CaptionFallback.java"),
       "CaptionFallback.pass")
@@ -379,6 +379,21 @@ check("diagnostics: a report names the platform's caption height and ours per ta
 
 # ── 9h. the renderer is chosen by geometry, and the choice is tested ────────
 fallback = launcher("CaptionFallback.java")
+# The caption has TWO shapes and only one of them reserves space. A display that draws
+# it as a window (One UI, everything before Android 14) publishes no app-bounds inset,
+# so an inset-only test says "no caption" while the platform's ▢ ✕ are on screen.
+check("caption: both shapes of the platform's caption are detected",
+      "int platformCaptionPx) {" in rule
+      and "if (platformCaptionPx > 0) {" in rule
+      and "final int platformPx = Math.max(t.platformCaption(), hostCaptionPx);" in caption_service
+      and "final int hostCaptionPx = host == null ? 0 : measureCaption(host);" in caption_service,
+      "CaptionRule + CaptionService reconcile")
+
+check("caption: the overlay renderer asks the service for the window-form caption",
+      "static int platformCaptionHeight(int taskId)" in caption_service
+      and "CaptionService.platformCaptionHeight(t.taskId))" in fallback,
+      "CaptionService.platformCaptionHeight + CaptionFallback")
+
 check("caption: a captoned window is drawn by the overlay, not by the service",
       "static int owner(int platformPx, boolean serviceHealthy, boolean stalled," in rule
       and "if (platformPx > 0) return OVERLAY;" in rule
@@ -388,7 +403,7 @@ check("caption: a captoned window is drawn by the overlay, not by the service",
 
 check("caption: the service hands a captoned window over instead of drawing under it",
       "handing it to the overlay renderer" in caption_service
-      and "if (t.hasPlatformCaption()) {" in caption_service,
+      and "if (platformPx > 0) {" in caption_service,
       "CaptionService reconcile")
 
 check("caption: our overlay never floats over the window in front of it",

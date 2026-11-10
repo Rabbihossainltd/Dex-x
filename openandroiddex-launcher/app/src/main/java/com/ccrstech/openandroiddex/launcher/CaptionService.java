@@ -531,6 +531,33 @@ public final class CaptionService extends AccessibilityService {
     private final Set<Integer> ourStrips = new HashSet<>();
     /** The height each task's bar is drawn at this pass, px — see CaptionRule.Plan. */
     private final Map<Integer, Integer> barHeights = new HashMap<>();
+    /**
+     * The platform caption SEEN on each task, px — the larger of the app-bounds inset and
+     * a caption-sized window at the task's top. Two forms, one answer, because a shell may
+     * use either: WM Shell on Android 14+ reserves space with an inset, while One UI and
+     * every earlier build draw a caption window inside the task's decor and reserve
+     * nothing. Read from the overlay renderer's worker thread, so concurrent.
+     */
+    private final Map<Integer, Integer> seenCaptions = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * The platform caption seen on this task, px — 0 when none is on screen.
+     *
+     * <p>The overlay renderer needs this and cannot compute it: a caption that exists as a
+     * WINDOW is only visible in the accessibility window list, which belongs to this
+     * service. Answered from the last reconcile pass.
+     */
+    static int platformCaptionHeight(int taskId) {
+        CaptionService s = live;
+        if (s == null) return 0;
+        Integer h = s.seenCaptions.get(taskId);
+        return h == null ? 0 : h;
+    }
+
+    /** Whether the platform draws a caption on this task at all — the renderer's question. */
+    static boolean platformCaptioned(int taskId) {
+        return platformCaptionHeight(taskId) > 0;
+    }
 
     /**
      * For diagnostics: every task the platform has reserved caption space on, what that
@@ -1415,6 +1442,7 @@ public final class CaptionService extends AccessibilityService {
             for (WmClient.Task t : stack) alive.add(t.taskId);
             platformCaptions.keySet().retainAll(alive);
             barHeights.keySet().retainAll(alive);
+            seenCaptions.keySet().retainAll(alive);
             ourStrips.retainAll(alive);
         }
         for (WmClient.Task t : stack) {
@@ -1508,6 +1536,14 @@ public final class CaptionService extends AccessibilityService {
             // checked on every pass even for a task already wearing an app-window bar, so
             // a caption that turns up late is adopted rather than left drawing over us.
             AccessibilityWindowInfo host = pickHost(windows, t);
+            // Both shapes of the platform's caption, measured once per task per pass:
+            // the app-bounds inset (Android 14+ WM Shell) and a caption-sized window at
+            // the task's top (One UI, and everything before 14). Either one means the
+            // space is the platform's and the bar over it must be an overlay of ours.
+            final int hostCaptionPx = host == null ? 0 : measureCaption(host);
+            final int platformPx = Math.max(t.platformCaption(), hostCaptionPx);
+            if (platformPx > 0) seenCaptions.put(t.taskId, platformPx);
+            else seenCaptions.remove(t.taskId);
             if (host == null && !CaptionFallback.hasBar(t.taskId)) {
                 if (!unhostedSince.containsKey(t.taskId)) {
                     unhostedSince.put(t.taskId, SystemClock.uptimeMillis());
@@ -1549,7 +1585,8 @@ public final class CaptionService extends AccessibilityService {
                     platformCaptions.get(t.taskId),
                     ourStrips.contains(t.taskId),
                     px(CAPTION_DP),
-                    animating.contains(t.taskId));
+                    animating.contains(t.taskId),
+                    platformPx);
             if (plan.remember) platformCaptions.put(t.taskId, plan.platformPx);
             barHeights.put(t.taskId, plan.barPx);
             if (plan.unstrip) {
@@ -1579,7 +1616,7 @@ public final class CaptionService extends AccessibilityService {
             // instead (CaptionFallback), and it is the primary renderer for exactly these
             // windows. Drawing from both is impossible; drawing from this one alone is
             // what left only the platform's bar on screen.
-            if (t.hasPlatformCaption()) {
+            if (platformPx > 0) {
                 // SparseArray#remove returns void, so take the bar out first.
                 Caption held = captions.get(t.taskId);
                 if (held != null) {

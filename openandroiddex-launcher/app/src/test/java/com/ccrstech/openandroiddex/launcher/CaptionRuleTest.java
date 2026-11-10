@@ -31,9 +31,11 @@ public final class CaptionRuleTest {
         Integer measured;                   // cache: null = never measured
         boolean weStripped;                 // did WE ask for the inset in force?
         boolean animating;
+        /** A platform caption SEEN as a window — the One UI / pre-14 form. */
+        int seenPx;
 
         CaptionRule.Plan pass() {
-            CaptionRule.Plan p = CaptionRule.decide(top, appTop, measured, weStripped, 80, animating);
+            CaptionRule.Plan p = CaptionRule.decide(top, appTop, measured, weStripped, 80, animating, seenPx);
             if (p.remember) measured = p.platformPx;
             if (p.unstrip) {                    // the daemon applies it: the app bounds go back
                 appTop = top;                   // to the platform's own inset next pass
@@ -121,6 +123,25 @@ public final class CaptionRuleTest {
         z.animating = true;
         p = z.pass();
         expect("bar height is never 0", p.barPx >= 1, "barPx=" + p.barPx);
+
+        // ── the caption that reserves NOTHING: a window inside the task ─────
+        // One UI and every build before Android 14 draw the caption as a window at the
+        // top of the task and publish no app-bounds inset. `now` is 0 there, so keying
+        // the decision on the inset alone reports "no caption" while the platform's own
+        // close and maximise are plainly on screen.
+        W win = new W();
+        win.seenPx = 72;
+        p = win.pass();
+        expect("a caption SEEN as a window -> bar is exactly its height", p.barPx == 72, "barPx=" + p.barPx);
+        expect("a caption SEEN as a window -> we reserve nothing of our own", !p.strip, "");
+        expect("a caption SEEN as a window -> recorded as the platform's", win.measured == 72, "");
+
+        W winStripped = new W();
+        winStripped.appTop = winStripped.top + 80;   // our strip, from an older pass
+        winStripped.weStripped = true;
+        winStripped.seenPx = 72;
+        p = winStripped.pass();
+        expect("a caption SEEN as a window releases our strip", p.unstrip, "");
 
         // ── who draws a bar, and why ────────────────────────────────────────
         // The accessibility bar lives inside a host window's surface tree; the platform's

@@ -69,11 +69,34 @@ final class CaptionRule {
      * @param ourPx        the height of the strip we would make, px (40 dp)
      * @param animating    a collapse/close animation is moving this task: do not
      *                     re-inset it, the rect it was measured against is gone
+     * @param platformCaptionPx a platform caption actually SEEN on this task, px — an
+     *                     app-bounds inset or a caption-sized window at the task's top;
+     *                     0 when neither is visible
      */
     static Plan decide(int top, int appTop, Integer measured, boolean weStripped,
-                       int ourPx, boolean animating) {
+                       int ourPx, boolean animating, int platformCaptionPx) {
         Plan p = new Plan();
         final int now = appTop - top;          // what is reserved in this task right now
+
+        // ── the SECOND form a platform caption takes ────────────────────────
+        //
+        // The app-bounds inset is only one of the two shapes this caption has. The other
+        // is a caption-sized WINDOW at the top of the task — which is how One UI and every
+        // build before Android 14 do it, and there it is a window inside the task's decor
+        // and WMS publishes NO inset at all. So `now` is 0 while the platform's ▢ ✕ are
+        // plainly on screen. Keying the whole decision on the inset alone (0.7.19) therefore
+        // put such a display straight back to "the platform's bar and nothing of ours".
+        //
+        // A caption we have actually SEEN is evidence of the first order: it wins over the
+        // cached measurement, and the bar is built to exactly its height and placed at the
+        // task's top.
+        if (platformCaptionPx > 0) {
+            p.platformPx = platformCaptionPx;
+            p.remember = true;
+            p.barPx = platformCaptionPx;
+            p.unstrip = weStripped && now > 0;   // any strip of ours here is now redundant
+            return p;
+        }
 
         if (measured != null) {
             // Settled: we know what the platform does on this task.

@@ -128,6 +128,49 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.20 — the caption has two shapes, and 0.7.19 only knew one
+
+Found by review, before shipping another round of the same report.
+
+### The hole
+
+0.7.19 keyed the renderer choice on the app-bounds inset — the shape a caption takes when WM
+Shell draws it (Android 14+). But a caption has two forms:
+
+| form | who draws it | does it inset the app? |
+| --- | --- | --- |
+| `SurfaceControl` child of the task | WM Shell, 14+ | yes — the inset IS the measurement |
+| a caption *window* inside the task's decor | One UI, every build before 14 | **no** — `appBounds.top == bounds.top` |
+
+On a phone using the second form `platformCaption()` reads 0, so 0.7.19 concluded "no platform
+caption", chose the accessibility renderer (which draws inside the task's own surface tree, and
+therefore *below* that caption window), reserved the strip a second time, and stood the overlay
+renderer down — the exact report, one more time.
+
+### The fix
+
+Two signals, whichever exists wins:
+
+```java
+final int hostCaptionPx = host == null ? 0 : measureCaption(host);   // the window form
+final int platformPx    = Math.max(t.platformCaption(), hostCaptionPx);  // either form
+```
+
+A caption actually *seen* is first-order evidence to `CaptionRule.decide`: the bar is exactly
+that tall, nothing is reserved, any strip of ours is released. The overlay renderer asks the
+service for the window-form height (`CaptionService.platformCaptionHeight`) because that window
+is only visible in the accessibility list.
+
+### Verified by running
+
+`tools/rule-test.sh` — 28 cases, four of them new and all four about this form. `tools/audit.py`
+— 64/64. The shipped APK was opened with `dexdump` and the new entry point is in it.
+
+### Still true
+
+Nothing here has been seen on a phone. The `dumpsys window windows` section in Diagnostics is
+the instrument that will say, by name, who owns the bar if it is still wrong.
+
 ## v0.7.19 — the bar that could not be anywhere else: geometry, not health, picks the renderer
 
 0.7.18 changed nothing on the phone, and this release says why in one sentence: **the

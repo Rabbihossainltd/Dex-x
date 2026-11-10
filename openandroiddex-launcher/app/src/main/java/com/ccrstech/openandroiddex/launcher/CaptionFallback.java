@@ -203,7 +203,13 @@ final class CaptionFallback {
             // refusing that host, left the platform's caption on screen and nothing of
             // ours. A bar drawn HERE is a top-level window of the launcher's own, above
             // every app in the display's z-order: the one thing that can cover a caption.
-            final int platformPx = t.platformCaption();
+            // Both shapes of the platform's caption: the app-bounds inset, which this
+            // renderer can read off the task itself, and a caption WINDOW at the task's
+            // top, which only the accessibility service can see. A display that uses the
+            // second form publishes no inset at all, so reading only the inset (0.7.19)
+            // read "no caption here" on exactly the phone this is for.
+            final int platformPx = Math.max(t.platformCaption(),
+                    CaptionService.platformCaptionHeight(t.taskId));
             final int barPx = platformPx > 0 ? platformPx : px;
             // Is this window's caption actually showing, or is it behind a higher window?
             // An overlay sits above EVERY app, so a bar for a window at the back would
