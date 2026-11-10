@@ -906,6 +906,45 @@ public final class WmDaemon {
             // the zygote's, mostly — in full for every process, so these
             // figures over-count and must never be presented as a share of
             // system memory.
+            case "WINDOWS": {
+                // dumpsys window, from a shell-uid process, is the only view on this phone
+                // that can say WHO draws a title bar — the caption the platform puts on a
+                // freeform task is a surface inside the task, not a window, so no API this
+                // app can call enumerates it, and three releases were spent guessing at it.
+                // The lines carrying a window's name, type and frame are all we need, and
+                // they are what is passed through here.
+                String dump = sh("dumpsys window windows");
+                if (dump.isEmpty()) {
+                    out.println("EMPTY");
+                    out.println("END");
+                    return;
+                }
+                String[] lines = dump.split("\n");
+                int sent = 0;
+                for (String line : lines) {
+                    String l = line.trim();
+                    boolean kept = l.startsWith("Window #") || l.contains("mFrame=")
+                            || l.contains("mAttrs=") || l.contains("mOwnerUid=")
+                            || l.contains("mDisplayId=") || l.startsWith("Display: mDisplayId=");
+                    if (!kept) continue;
+                    out.println(l);
+                    if (++sent >= 400) break;
+                }
+                // SurfaceFlinger's layer names: on a shell that decorates its own desktop
+                // the caption surface usually carries a name saying so.
+                for (String line : sh("dumpsys SurfaceFlinger --list").split("\n")) {
+                    String l = line.trim();
+                    if (l.isEmpty()) continue;
+                    String low = l.toLowerCase(java.util.Locale.ROOT);
+                    if (low.contains("caption") || low.contains("decor") || low.contains("titlebar")) {
+                        out.println("LAYER " + l);
+                        if (++sent >= 520) break;
+                    }
+                }
+                out.println("END");
+                return;
+            }
+
             case "PROCS": {
                 long[] cpu = readCpuJiffies();
                 out.println("TOTAL " + (cpu == null ? "0 0" : cpu[0] + " " + cpu[1]));

@@ -684,6 +684,39 @@ final class WmClient {
     }
 
     /**
+     * The window list as the platform itself prints it, for diagnostics.
+     *
+     * <p>The daemon runs as shell, so {@code dumpsys window windows} is available to it and
+     * to nothing else in this app. It answers the one question three releases guessed at:
+     * WHO owns the title bar on a freeform window — a caption surface inside the task, a
+     * window of the shell's, or ours. Returns every line up to the terminal {@code END},
+     * or null when the daemon did not answer.
+     */
+    java.util.List<String> windowsDump() {
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        synchronized (this) {
+            if (!connect()) return null;
+            try {
+                out.println("WINDOWS");
+                String line;
+                boolean sawEnd = false;
+                while ((line = in.readLine()) != null) {
+                    if ("END".equals(line)) { sawEnd = true; break; }
+                    lines.add(line);
+                }
+                if (!sawEnd) {
+                    close();              // EOF mid-list: the daemon went away
+                    return null;
+                }
+            } catch (Exception e) {
+                close();
+                return null;
+            }
+        }
+        return lines;
+    }
+
+    /**
      * "0.1250", never "0,1250": the daemon reads it with Float.parseFloat, and this
      * process formats in whatever language the desktop is set to (see DexLocale).
      */

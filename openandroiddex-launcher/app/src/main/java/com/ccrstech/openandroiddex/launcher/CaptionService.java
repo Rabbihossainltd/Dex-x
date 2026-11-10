@@ -1571,6 +1571,26 @@ public final class CaptionService extends AccessibilityService {
                 final int stripPx = plan.barPx;
                 wm.post(() -> wm.strip(display, taskId, stripPx));
             }
+            // ── this window is not ours to draw ──────────────────────────
+            //
+            // A bar from this service lives inside a host window's surface tree, and the
+            // platform's caption is a surface ABOVE the app's — so here, we lose on
+            // geometry whatever we do. The launcher's overlay renderer covers this one
+            // instead (CaptionFallback), and it is the primary renderer for exactly these
+            // windows. Drawing from both is impossible; drawing from this one alone is
+            // what left only the platform's bar on screen.
+            if (t.hasPlatformCaption()) {
+                // SparseArray#remove returns void, so take the bar out first.
+                Caption held = captions.get(t.taskId);
+                if (held != null) {
+                    captions.remove(t.taskId);
+                    release(held);
+                    trace("task " + t.taskId + ": the platform's caption owns this window —"
+                            + " handing it to the overlay renderer");
+                }
+                hideCurtain(t.taskId);
+                continue;
+            }
             // Title and size first, and without needing the host — a window resized on a
             // pass where the host is missing must still get a correctly sized bar.
             //

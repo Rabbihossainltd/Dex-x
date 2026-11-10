@@ -122,6 +122,25 @@ public final class CaptionRuleTest {
         p = z.pass();
         expect("bar height is never 0", p.barPx >= 1, "barPx=" + p.barPx);
 
+        // ── who draws a bar, and why ────────────────────────────────────────
+        // The accessibility bar lives inside a host window's surface tree; the platform's
+        // caption is above the app's. On a captoned task that renderer cannot win, so
+        // the overlay must be chosen — even when the service is perfectly healthy.
+        expect("a captoned window is drawn by the overlay, service healthy or not",
+                CaptionRule.owner(48, true, false, false) == CaptionRule.OVERLAY, "");
+        expect("a captoned window is drawn by the overlay, service stalled",
+                CaptionRule.owner(48, true, true, false) == CaptionRule.OVERLAY, "");
+        expect("no platform caption + healthy service -> accessibility bar",
+                CaptionRule.owner(0, true, false, false) == CaptionRule.ACCESSIBILITY, "");
+        expect("no platform caption + stalled service -> overlay takes over",
+                CaptionRule.owner(0, true, true, false) == CaptionRule.OVERLAY, "");
+        expect("no platform caption + dead service -> overlay",
+                CaptionRule.owner(0, false, false, false) == CaptionRule.OVERLAY, "");
+        expect("a caption hidden behind a higher window is not covered",
+                CaptionRule.owner(48, true, false, true) == CaptionRule.NONE, "");
+        expect("no second bar: a covered window gets nothing, not the service's bar",
+                CaptionRule.owner(0, true, false, true) == CaptionRule.NONE, "");
+
         System.out.println();
         System.out.println(fails == 0 ? "ALL RULE CASES PASS" : fails + " CASE(S) FAILED");
         System.exit(fails == 0 ? 0 : 1);

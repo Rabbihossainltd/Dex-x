@@ -377,6 +377,37 @@ check("diagnostics: a report names the platform's caption height and ours per ta
       and ".append(\" caption=\").append(t.platformCaption())" in launcher("Diagnostics.java"),
       "describeDressing + appendTasks")
 
+# ── 9h. the renderer is chosen by geometry, and the choice is tested ────────
+fallback = launcher("CaptionFallback.java")
+check("caption: a captoned window is drawn by the overlay, not by the service",
+      "static int owner(int platformPx, boolean serviceHealthy, boolean stalled," in rule
+      and "if (platformPx > 0) return OVERLAY;" in rule
+      and "final int owner = CaptionRule.owner(platformPx, service," in fallback
+      and "if (owner != CaptionRule.OVERLAY) {" in fallback,
+      "CaptionRule.owner + CaptionFallback.pass")
+
+check("caption: the service hands a captoned window over instead of drawing under it",
+      "handing it to the overlay renderer" in caption_service
+      and "if (t.hasPlatformCaption()) {" in caption_service,
+      "CaptionService reconcile")
+
+check("caption: our overlay never floats over the window in front of it",
+      "android.graphics.Rect.intersects(r, capRect)" in fallback
+      and "private void raise(Bar b) {" in fallback,
+      "CaptionFallback occlusion + focus raise")
+
+check("caption: the desktop's base task wears no bar from either renderer",
+      "if (t.taskId == baseId) continue;" in fallback,
+      "CaptionFallback.pass")
+
+# Evidence, so the next round is not another guess: the daemon runs as shell and
+# can read dumpsys window, which names the owner of every title bar on the display.
+check("diagnostics: dumpsys window is in the report, through the daemon",
+      'case "WINDOWS": {' in read(ROOT / "openandroiddex-wmd/src/com/ccrstech/openandroiddex/wmd/WmDaemon.java")
+      and "java.util.List<String> windowsDump()" in wm_client
+      and "wm.windowsDump()" in launcher("Diagnostics.java"),
+      "WmDaemon WINDOWS verb + WmClient.windowsDump + Diagnostics")
+
 # The rule is tested by executing it, not by reading it: the test lives in the
 # repo and tools/rule-test.sh runs it with nothing but a JDK.
 rule_test = ROOT / "openandroiddex-launcher/app/src/test/java/com/ccrstech/openandroiddex/launcher/CaptionRuleTest.java"

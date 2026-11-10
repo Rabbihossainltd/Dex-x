@@ -111,6 +111,43 @@ final class CaptionRule {
         return p;
     }
 
+    // ── who draws a window's bar ────────────────────────────────────────────
+
+    /** Nothing is drawn: the caption is not on screen, or the other renderer owns it. */
+    static final int NONE = 0;
+    /** The accessibility renderer, inside a host window's surface tree. */
+    static final int ACCESSIBILITY = 1;
+    /** This app's own top-level overlay window, above every app in the display. */
+    static final int OVERLAY = 2;
+
+    /**
+     * Which renderer draws the bar on one task.
+     *
+     * <p>THE GEOMETRY IS THE WHOLE ANSWER. A caption the platform draws on a freeform
+     * task is a surface child of that task, above the app — so the accessibility
+     * renderer, whose bar lives inside a host window's surface tree, can only ever put
+     * its bar BELOW it. That is not a health problem to be retried; it is a position
+     * that renderer can never occupy. Only a top-level window of ours sits above every
+     * app in the display, so on a captoned task the overlay renderer is the primary one,
+     * whatever the accessibility service is doing.
+     *
+     * <p>Where the platform draws no caption the accessibility bar is the better
+     * renderer — it needs no extra window and cannot float over another app — and the
+     * overlay stays the standby it always was, for the service being unbound or stalled.
+     *
+     * @param platformPx the platform's caption height on this task, px; 0 for none
+     * @param serviceHealthy the caption service is bound and can reach the daemon
+     * @param stalled the service has had this task undressed long enough to give up on
+     * @param coveredByHigher an opaque window above this one covers where the caption sits
+     */
+    static int owner(int platformPx, boolean serviceHealthy, boolean stalled,
+                     boolean coveredByHigher) {
+        if (coveredByHigher) return NONE;         // the platform's own caption is hidden too
+        if (platformPx > 0) return OVERLAY;       // only a top-level window can cover it
+        if (serviceHealthy && !stalled) return ACCESSIBILITY;
+        return OVERLAY;
+    }
+
     /** Drop the measurement for a task that is gone, so a reused id is measured again. */
     static void forget(Map<Integer, Integer> measured, int taskId) {
         measured.remove(taskId);

@@ -123,6 +123,24 @@ final class Diagnostics {
             b.append("  threw: ").append(t).append('\n');
         }
 
+        b.append("\n-- windows as the platform prints them (dumpsys window) --\n");
+        if (up) {
+            try {
+                List<String> dump = wm.windowsDump();
+                if (dump == null) {
+                    b.append("  (the daemon could not run dumpsys — it may not be shell)\n");
+                } else if (dump.isEmpty()) {
+                    b.append("  (empty)\n");
+                } else {
+                    for (String line : dump) b.append("  ").append(line).append('\n');
+                }
+            } catch (Throwable t) {
+                b.append("  threw: ").append(t).append('\n');
+            }
+        } else {
+            b.append("  (no daemon)\n");
+        }
+
         b.append("\n-- caption fallback --\n");
         b.append("fallback bars on screen: ").append(CaptionFallback.barCount()).append('\n');
 

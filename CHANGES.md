@@ -128,6 +128,57 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.19 — the bar that could not be anywhere else: geometry, not health, picks the renderer
+
+0.7.18 changed nothing on the phone, and this release says why in one sentence: **the
+renderer it kept was the one that can never win that geometry.**
+
+### What was wrong with the last three attempts, stated properly
+
+Every caption this project drew went into a `SurfaceControlViewHost` reparented into a host
+window's surface — inside the task's own surface tree. Since Android 14 the platform's
+caption is a **surface child of the task, above the app's surface**. A bar drawn inside that
+tree can therefore only ever be *below* the platform's caption. It is not a health problem,
+not a permission problem and not a timing problem: there is no position inside the task where
+a bar of ours comes out on top. 0.7.16 tried to switch the platform's caption off (it switched
+off the wrong thing), 0.7.17 stopped us drawing a second one (the platform's stayed), 0.7.18
+stopped the accessibility renderer drawing under it — and left nothing in its place, which is
+exactly the "kichui fix hoini" that came back.
+
+### What 0.7.19 does
+
+| | |
+| --- | --- |
+| the renderer is chosen by geometry | `CaptionRule.owner(platformPx, serviceHealthy, stalled, coveredByHigher)` — a pure function, tested by running it |
+| a captoned task | drawn by the **launcher's own top-level overlay window**, the one thing in this app above every app in the display's z-order; chosen **whether or not** the accessibility service is healthy |
+| a task with no platform caption | the accessibility bar, as before — no extra window, no floating over another app |
+| the bar's height | exactly the platform's inset, so it covers that strip edge to edge and its buttons are never visible under ours |
+| the strip | ours only where the platform reserved nothing — never both, so the content cannot be pushed down twice and the black band has nothing to leave empty |
+| never floating over the front window | a bar is only drawn where that window's caption is actually showing; a caption hidden behind a higher window gets no cover |
+| focus | the front window's bar is re-added when focus moves, because our overlays stack in the order they were added |
+| the desktop | the base task is skipped by both renderers — no bar, platform's or ours |
+
+### Evidence, so round five is not another guess
+
+The daemon runs as shell, so `dumpsys window windows` is available to it and to nothing else
+in this app. New `WINDOWS` verb; Diagnostics prints the window names, types, frames and
+display ids, plus SurfaceFlinger layer names containing *caption*, *decor* or *titlebar*.
+That output names the owner of every title bar on the display. If a caption is still not
+ours, the report says whose it is.
+
+### Checked by running
+
+`bash tools/rule-test.sh` — 24 cases against the real `CaptionRule`, including "a captoned
+window is drawn by the overlay, service healthy or not" and "a caption hidden behind a higher
+window is not covered". Audit 62/62. The shipped APK was opened and confirmed to contain the
+new call.
+
+### Honest gap
+
+Still not seen on a phone. But this round's claim is narrower and mechanical: the only bar of
+ours that can be above the platform's is a window of ours, and that is now the one that draws
+there.
+
 ## v0.7.18 — one caption, and it is ours: measured, never doubled
 
 Three reports: *"abar check koro fix gula"*, *"double caption bar — old + new, remove the
