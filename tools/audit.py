@@ -359,7 +359,7 @@ check("caption: an override left by an older build is released once per session"
 # task's app bounds: it makes a strip where nothing is reserved and NEVER releases
 # one, because the release bookkeeping is the service's.
 check("caption: the fallback covers the platform's caption and never fights for the strip",
-      "final int platformPx = Math.max(t.platformCaption()," in launcher("CaptionFallback.java")
+      "CaptionRule.captionPx(t.platformCaption(), seenCaption(t, service))" in launcher("CaptionFallback.java")
       and "final int barPx = platformPx > 0 ? platformPx : px;" in launcher("CaptionFallback.java")
       and "wm.unstrip(" not in launcher("CaptionFallback.java"),
       "CaptionFallback.pass")
@@ -383,15 +383,15 @@ fallback = launcher("CaptionFallback.java")
 # it as a window (One UI, everything before Android 14) publishes no app-bounds inset,
 # so an inset-only test says "no caption" while the platform's ▢ ✕ are on screen.
 check("caption: both shapes of the platform's caption are detected",
-      "int platformCaptionPx) {" in rule
+      "int platformCaptionPx, int quietPasses) {" in rule
       and "if (platformCaptionPx > 0) {" in rule
-      and "final int platformPx = Math.max(t.platformCaption(), hostCaptionPx);" in caption_service
+      and "CaptionRule.captionPx(t.platformCaption(), hostCaptionPx)" in caption_service
       and "final int hostCaptionPx = host == null ? 0 : measureCaption(host);" in caption_service,
       "CaptionRule + CaptionService reconcile")
 
 check("caption: the overlay renderer asks the service for the window-form caption",
       "static int platformCaptionHeight(int taskId)" in caption_service
-      and "CaptionService.platformCaptionHeight(t.taskId))" in fallback,
+      and "int fromService = CaptionService.platformCaptionHeight(t.taskId);" in fallback,
       "CaptionService.platformCaptionHeight + CaptionFallback")
 
 check("caption: a captoned window is drawn by the overlay, not by the service",
@@ -407,12 +407,12 @@ check("caption: the service hands a captoned window over instead of drawing unde
       "CaptionService reconcile")
 
 check("caption: our overlay never floats over the window in front of it",
-      "android.graphics.Rect.intersects(r, capRect)" in fallback
-      and "private void raise(Bar b) {" in fallback,
+      "android.graphics.Rect.intersects(" in fallback
+      and "for (int jx = 0; jx < ix; jx++) {" in fallback,
       "CaptionFallback occlusion + focus raise")
 
 check("caption: the desktop's base task wears no bar from either renderer",
-      "if (t.taskId == baseId) continue;" in fallback,
+      "if (t.taskId != baseId) showing.add(t);" in fallback,
       "CaptionFallback.pass")
 
 # Evidence, so the next round is not another guess: the daemon runs as shell and
@@ -426,12 +426,61 @@ check("diagnostics: dumpsys window is in the report, through the daemon",
 # The rule is tested by executing it, not by reading it: the test lives in the
 # repo and tools/rule-test.sh runs it with nothing but a JDK.
 rule_test = ROOT / "openandroiddex-launcher/app/src/test/java/com/ccrstech/openandroiddex/launcher/CaptionRuleTest.java"
+ci = read(ROOT / ".github/workflows/dex-x.yml")
 check("caption: the rule's test exists and covers the override trap",
       rule_test.exists()
       and "our own strip is released, not believed" in read(rule_test)
       and "ALL RULE CASES PASS" in read(rule_test)
       and (ROOT / "tools/rule-test.sh").exists(),
       "CaptionRuleTest + tools/rule-test.sh")
+
+# ── 9i. the review's findings, pinned so they cannot come back ─────────────
+check("caption: a release is only sent when there is something to release",
+      "p.unstrip = now > 0 && now != measured;" in rule,
+      "CaptionRule.decide — the per-pass daemon command")
+
+check("caption: a remembered height expires when the caption has gone",
+      "static final int FORGET_AFTER = 25;" in rule
+      and "if (measured != null && quietPasses < FORGET_AFTER) {" in rule
+      and "quietPasses.merge(t.taskId, 1, Integer::sum)" in caption_service,
+      "CaptionRule.FORGET_AFTER + CaptionService counting")
+
+check("caption: both renderers ask one function for the caption height",
+      "static int captionPx(int insetPx, int seenPx)" in rule
+      and "CaptionRule.captionPx(t.platformCaption(), hostCaptionPx)" in caption_service
+      and "CaptionRule.captionPx(t.platformCaption(), seenCaption(t, service))" in fallback,
+      "CaptionRule.captionPx")
+
+check("caption: the occlusion test sees every visible window, not just the kept ones",
+      "final List<WmClient.Task> showing = new ArrayList<>();" in fallback
+      and "for (int ix = 0; ix < showing.size(); ix++) {" in fallback,
+      "CaptionFallback two-pass")
+
+check("caption: with the service off, the caption height comes from the daemon, not a guess",
+      "int captionProbe(int displayId, int taskId)" in wm_client
+      and 'case "CAPTION": {' in read(ROOT / "openandroiddex-wmd/src/com/ccrstech/openandroiddex/wmd/WmDaemon.java")
+      and "CaptionDump.captionHeight(dump, displayId," in read(ROOT / "openandroiddex-wmd/src/com/ccrstech/openandroiddex/wmd/WmDaemon.java")
+      and "int px = wm.captionProbe(display, t.taskId);" in fallback,
+      "WmDaemon CAPTION + CaptionDump + CaptionFallback.seenCaption")
+
+check("caption: the dumpsys parser has a test that runs without a phone",
+      (ROOT / "openandroiddex-wmd/test/com/ccrstech/openandroiddex/wmd/CaptionDumpTest.java").exists()
+      and (ROOT / "tools/dump-test.sh").exists()
+      and "ALL DUMP CASES PASS" in read(ROOT / "openandroiddex-wmd/test/com/ccrstech/openandroiddex/wmd/CaptionDumpTest.java"),
+      "CaptionDumpTest + tools/dump-test.sh")
+
+# The guard rails have to run where a release is made, not only on my machine.
+check("ci: the audit and both test suites run before the build",
+      "run: python3 tools/audit.py" in ci
+      and "run: bash tools/rule-test.sh" in ci
+      and "run: bash tools/dump-test.sh" in ci,
+      ".github/workflows/dex-x.yml")
+
+# Deleted on purpose: the focus-raise machinery rebuilt a system window on every click
+# to solve an overlap that cannot happen (a bar is only drawn where its caption shows).
+check("caption: the overlay does not rebuild windows to restack them",
+      "frontTask" not in fallback and "void lift()" not in fallback,
+      "CaptionFallback raise/lift removed")
 
 # ── 10. versions agree everywhere ───────────────────────────────────────────
 gradle = read(ROOT / "openandroiddex-launcher/app/build.gradle")

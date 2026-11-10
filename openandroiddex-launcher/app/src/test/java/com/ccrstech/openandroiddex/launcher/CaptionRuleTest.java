@@ -33,9 +33,11 @@ public final class CaptionRuleTest {
         boolean animating;
         /** A platform caption SEEN as a window — the One UI / pre-14 form. */
         int seenPx;
+        /** Passes in a row with nothing reserved and no caption seen. */
+        int quiet;
 
         CaptionRule.Plan pass() {
-            CaptionRule.Plan p = CaptionRule.decide(top, appTop, measured, weStripped, 80, animating, seenPx);
+            CaptionRule.Plan p = CaptionRule.decide(top, appTop, measured, weStripped, 80, animating, seenPx, quiet);
             if (p.remember) measured = p.platformPx;
             if (p.unstrip) {                    // the daemon applies it: the app bounds go back
                 appTop = top;                   // to the platform's own inset next pass
@@ -123,6 +125,36 @@ public final class CaptionRuleTest {
         z.animating = true;
         p = z.pass();
         expect("bar height is never 0", p.barPx >= 1, "barPx=" + p.barPx);
+
+        // ── the storm: a release only when there IS something to release ────
+        // `now != measured` is true forever on a caption-window display, where nothing
+        // is ever reserved — one daemon command every pass, 60 ms apart, all session.
+        W s1 = new W();
+        s1.appTop = s1.top + 80;                 // our strip, measured as a caption of 80
+        CaptionRule.Plan first = s1.pass();
+        s1.appTop = s1.top;                      // released: nothing reserved now
+        s1.measured = 80;                        // and the old height is remembered
+        CaptionRule.Plan second = s1.pass();
+        expect("nothing reserved and a remembered height -> NO release is sent",
+                !second.unstrip, "unstrip=" + second.unstrip);
+        CaptionRule.Plan third = s1.pass();
+        expect("and it stays quiet on the pass after that", !third.unstrip, "");
+
+        // ── the stale height: a caption that is gone must stop being believed ──
+        // The real case: the platform captioned this window at 48 px, then stopped
+        // (the window was re-launched fullscreen, or the shell changed its mind).
+        // Nothing is reserved now and nothing is seen, and the remembered 48 must not
+        // keep a 48 px bar standing over the content for the rest of the session.
+        W stale = new W();
+        stale.measured = 48;                     // remembered from when it did caption
+        for (int i = 0; i < CaptionRule.FORGET_AFTER - 1; i++) stale.pass();
+        expect("a remembered height survives the quiet passes before the limit",
+                stale.measured != null && stale.measured == 48, "measured=" + stale.measured);
+        stale.quiet = CaptionRule.FORGET_AFTER;  // the reconcile counts, the rule is told
+        CaptionRule.Plan forgot = stale.pass();
+        expect("at the limit the rule stops trusting it and measures again",
+                forgot.remember && forgot.platformPx == 0,
+                "remember=" + forgot.remember + " platformPx=" + forgot.platformPx);
 
         // ── the caption that reserves NOTHING: a window inside the task ─────
         // One UI and every build before Android 14 draw the caption as a window at the

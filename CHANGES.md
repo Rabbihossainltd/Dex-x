@@ -128,6 +128,42 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.21 — the review's findings, fixed
+
+`/ponytail-review` and `/ponytail-audit` were run properly this time (the skill files from
+DietrichGebert/ponytail). They found seven things. This release fixes them, keeps the two that
+can be tested behind a test, and makes CI run those tests.
+
+### Must fix
+
+| finding | what happened |
+| --- | --- |
+| the release command fired every pass, forever | `p.unstrip = now != measured` was true permanently on a display whose caption is a window — one daemon command every 60 ms, all session. Now `now > 0 && now != measured`. |
+| CI never ran the tests | `tools/audit.py`, `tools/rule-test.sh` and the new `tools/dump-test.sh` now run before the build. Until now a commit could break all of them and still ship. |
+| service off → our bar under the platform's | the overlay renderer had no witness for a caption drawn as a window. The daemon runs as shell, so it now answers `CAPTION <display> <task>` from `dumpsys window windows`, parsed by a pure `CaptionDump` class. |
+
+### Should fix
+
+| finding | what happened |
+| --- | --- |
+| a remembered height never expired | `CaptionRule.FORGET_AFTER` (25 quiet passes) drops the measurement, so a window whose caption is gone does not keep a bar of the old height over its content. |
+| dead restacking machinery | `raise()`, `Band.lift()` and `frontTask` deleted — about 34 lines that rebuilt a system window on every focus change to solve an overlap that cannot happen. |
+| the occlusion list skipped windows | the visible windows are now collected in one pass before the decision loop, so a window skipped for its package or its size can still occlude. |
+| two copies of one rule | `CaptionRule.captionPx(inset, seen)` — both renderers call it. |
+
+### Tested by running
+
+`tools/rule-test.sh` — 32 cases (four new: the storm, the quiet passes, the expiry). `tools/
+dump-test.sh` — 9 cases against a dumpsys in AOSP's shape, with four decoys: a caption on the
+wrong display, a window sharing the top edge but not the width, a caption-height window
+nowhere near the top, and a screen-filling window. It found a real weakness on the first run
+(spaces inside `mFrame` defeated the parser) which is now fixed. `tools/audit.py` — 72 checks.
+
+### Still true
+
+Nothing has been seen on a phone. What has changed is that the parts that can be checked
+without one — the rule, the parser, the wiring, the CI — now fail loudly instead of silently.
+
 ## v0.7.20 — the caption has two shapes, and 0.7.19 only knew one
 
 Found by review, before shipping another round of the same report.

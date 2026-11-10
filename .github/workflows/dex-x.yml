@@ -55,6 +55,19 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # The guard rails, before anything is built. Until 0.7.21 none of these ran in
+      # CI: a commit that broke all 64 audit checks still went green and shipped, and
+      # the checks that would have caught 0.7.19's hole could not have stopped it.
+      # All three need nothing but the JDK the runner already has.
+      - name: Audit every claim the project makes about itself
+        run: python3 tools/audit.py
+
+      - name: Run the caption rule through every state it will see
+        run: bash tools/rule-test.sh
+
+      - name: Run the dumpsys caption parser against real-format dumps
+        run: bash tools/dump-test.sh
+
       - name: Build the launcher APK
         working-directory: openandroiddex-launcher
         # Debug, not release: assembleRelease has no signingConfig and emits an

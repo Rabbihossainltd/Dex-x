@@ -34,6 +34,9 @@ import java.util.List;
  *   LIST <display>                            -> TASK <ix> <id> … (topmost first) / END
  *   STRIP <display> <task> <px>               -> OK          reserve a caption inset
  *   UNSTRIP <display> <task>                  -> OK          release it
+ *   CAPTION <display> <task>                  -> OK <px>     the platform's caption WINDOW
+ *                                                 on that task, from dumpsys (0 = none)
+ *   WINDOWS                                   -> <lines> / END  dumpsys window windows
  *   MOVE <display> <task> <x> <y>             -> OK <l> <t> <r> <b>
  *   BOUNDS <display> <task> <l> <t> <r> <b>   -> OK          instant, per-frame drag
  *   RESIZE <display> <task> <l> <t> <r> <b> <px> -> OK       animated one-shot + re-strip
@@ -906,6 +909,28 @@ public final class WmDaemon {
             // the zygote's, mostly — in full for every process, so these
             // figures over-count and must never be presented as a share of
             // system memory.
+            case "CAPTION": {
+                // The caption a phone draws as a WINDOW on top of a freeform task, in px.
+                // Asked from the app-bounds inset, but that only sees the shape WM Shell
+                // draws on Android 14+; a display that draws the caption as a window
+                // reserves nothing, and when the accessibility service is switched off
+                // nothing in the launcher can measure it. dumpsys can, from shell uid,
+                // and CaptionDump turns it into one number.
+                int displayId = i(a, 1);
+                int taskId = i(a, 2);
+                Wm.TaskRec t = Wm.taskById(displayId, taskId);
+                if (t == null) {
+                    out.println("ERR no such task");
+                    return;
+                }
+                int maxPx = Math.max(48, t.bounds.height() / 3);
+                String dump = sh("dumpsys window windows");
+                int captionPx = CaptionDump.captionHeight(dump, displayId,
+                        t.bounds.left, t.bounds.top, t.bounds.right, t.pkg, maxPx);
+                out.println("OK " + captionPx);
+                return;
+            }
+
             case "WINDOWS": {
                 // dumpsys window, from a shell-uid process, is the only view on this phone
                 // that can say WHO draws a title bar — the caption the platform puts on a

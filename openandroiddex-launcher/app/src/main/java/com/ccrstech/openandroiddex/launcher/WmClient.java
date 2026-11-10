@@ -692,6 +692,26 @@ final class WmClient {
      * window of the shell's, or ours. Returns every line up to the terminal {@code END},
      * or null when the daemon did not answer.
      */
+    /**
+     * The height of the platform's caption WINDOW on one task, px — 0 for none.
+     *
+     * <p>Asked of the daemon because it runs as shell and can read {@code dumpsys}; the
+     * launcher cannot. This is the only measurement available when the accessibility
+     * service is switched off, which is the normal state on Android 13+ for a sideloaded
+     * app — and the state in which the overlay renderer used to guess a height and leave
+     * the platform's own buttons showing underneath our bar.
+     */
+    int captionProbe(int displayId, int taskId) {
+        String reply = request("CAPTION " + displayId + " " + taskId);
+        if (!ok(reply)) return 0;
+        String[] p = reply.trim().split("\\s+");
+        try {
+            return p.length >= 2 ? Math.max(0, Integer.parseInt(p[1])) : 0;
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
     java.util.List<String> windowsDump() {
         java.util.List<String> lines = new java.util.ArrayList<>();
         synchronized (this) {

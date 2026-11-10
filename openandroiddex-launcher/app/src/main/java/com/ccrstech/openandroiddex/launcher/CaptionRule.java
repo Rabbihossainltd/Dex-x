@@ -72,9 +72,17 @@ final class CaptionRule {
      * @param platformCaptionPx a platform caption actually SEEN on this task, px — an
      *                     app-bounds inset or a caption-sized window at the task's top;
      *                     0 when neither is visible
+     * @param quietPasses  passes in a row with nothing reserved and no caption seen. After
+     *                     {@link #FORGET_AFTER} of them a remembered height is dropped and
+     *                     measured again: a window whose caption disappears must not keep
+     *                     a bar of the old height standing over its content for the rest
+     *                     of the session
      */
+    /** Consecutive quiet passes after which a remembered height stops being trusted. */
+    static final int FORGET_AFTER = 25;
+
     static Plan decide(int top, int appTop, Integer measured, boolean weStripped,
-                       int ourPx, boolean animating, int platformCaptionPx) {
+                       int ourPx, boolean animating, int platformCaptionPx, int quietPasses) {
         Plan p = new Plan();
         final int now = appTop - top;          // what is reserved in this task right now
 
@@ -98,7 +106,7 @@ final class CaptionRule {
             return p;
         }
 
-        if (measured != null) {
+        if (measured != null && quietPasses < FORGET_AFTER) {
             // Settled: we know what the platform does on this task.
             p.platformPx = measured;
             p.remember = false;
@@ -107,7 +115,10 @@ final class CaptionRule {
                 // no override of our own; anything else in the app bounds is a strip we
                 // made before this was measured, or a stale one from a moved window.
                 p.barPx = measured;
-                p.unstrip = now != measured;
+                // ONLY when there is something to release. `now != measured` alone is
+                // true forever on a caption-window display, where nothing is ever
+                // reserved: one daemon command every pass, 60 ms apart, all session.
+                p.unstrip = now > 0 && now != measured;
             } else {
                 // The platform draws nothing here, so the strip is ours to make.
                 p.barPx = ourPx;
@@ -169,6 +180,18 @@ final class CaptionRule {
         if (platformPx > 0) return OVERLAY;       // only a top-level window can cover it
         if (serviceHealthy && !stalled) return ACCESSIBILITY;
         return OVERLAY;
+    }
+
+    /**
+     * The platform's caption height on one task, from both shapes it can take.
+     *
+     * <p>One rule, one place: an app-bounds inset (WM Shell, Android 14+) and a
+     * caption-sized window at the task's top (One UI, everything before 14) are the same
+     * fact measured two ways. Both renderers ask this, so they cannot drift apart the way
+     * they did in 0.7.19 — a bug that lived in the difference between two copies.
+     */
+    static int captionPx(int insetPx, int seenPx) {
+        return Math.max(insetPx, seenPx);
     }
 
     /** Drop the measurement for a task that is gone, so a reused id is measured again. */

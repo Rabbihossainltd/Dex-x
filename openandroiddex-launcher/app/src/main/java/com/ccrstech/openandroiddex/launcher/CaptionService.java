@@ -539,6 +539,11 @@ public final class CaptionService extends AccessibilityService {
      * nothing. Read from the overlay renderer's worker thread, so concurrent.
      */
     private final Map<Integer, Integer> seenCaptions = new java.util.concurrent.ConcurrentHashMap<>();
+    /**
+     * Passes in a row with nothing reserved on a task and no caption seen. At
+     * {@link CaptionRule#FORGET_AFTER} the remembered height is dropped — see CaptionRule.
+     */
+    private final Map<Integer, Integer> quietPasses = new HashMap<>();
 
     /**
      * The platform caption seen on this task, px — 0 when none is on screen.
@@ -1443,6 +1448,7 @@ public final class CaptionService extends AccessibilityService {
             platformCaptions.keySet().retainAll(alive);
             barHeights.keySet().retainAll(alive);
             seenCaptions.keySet().retainAll(alive);
+            quietPasses.keySet().retainAll(alive);
             ourStrips.retainAll(alive);
         }
         for (WmClient.Task t : stack) {
@@ -1541,9 +1547,15 @@ public final class CaptionService extends AccessibilityService {
             // the task's top (One UI, and everything before 14). Either one means the
             // space is the platform's and the bar over it must be an overlay of ours.
             final int hostCaptionPx = host == null ? 0 : measureCaption(host);
-            final int platformPx = Math.max(t.platformCaption(), hostCaptionPx);
+            final int platformPx = CaptionRule.captionPx(t.platformCaption(), hostCaptionPx);
             if (platformPx > 0) seenCaptions.put(t.taskId, platformPx);
             else seenCaptions.remove(t.taskId);
+            // Count the passes with nothing to see: a height measured once must not
+            // outlive the caption it came from (see CaptionRule.FORGET_AFTER).
+            final int quiet = platformPx == 0 && t.appTop == t.top
+                    ? Math.min(CaptionRule.FORGET_AFTER + 1, quietPasses.merge(t.taskId, 1, Integer::sum))
+                    : quietPasses.merge(t.taskId, 0, (a, b) -> 0);
+            quietPasses.put(t.taskId, quiet);
             if (host == null && !CaptionFallback.hasBar(t.taskId)) {
                 if (!unhostedSince.containsKey(t.taskId)) {
                     unhostedSince.put(t.taskId, SystemClock.uptimeMillis());
@@ -1586,8 +1598,16 @@ public final class CaptionService extends AccessibilityService {
                     ourStrips.contains(t.taskId),
                     px(CAPTION_DP),
                     animating.contains(t.taskId),
-                    platformPx);
-            if (plan.remember) platformCaptions.put(t.taskId, plan.platformPx);
+                    platformPx,
+                    quiet);
+            if (plan.remember) {
+                platformCaptions.put(t.taskId, plan.platformPx);
+                quietPasses.put(t.taskId, 0);
+            } else if (quiet > CaptionRule.FORGET_AFTER && platformCaptions.remove(t.taskId) != null) {
+                trace("task " + t.taskId + ": its caption has been gone for " + quiet
+                        + " passes — dropping the remembered height");
+                quietPasses.put(t.taskId, 0);
+            }
             barHeights.put(t.taskId, plan.barPx);
             if (plan.unstrip) {
                 ourStrips.remove(t.taskId);

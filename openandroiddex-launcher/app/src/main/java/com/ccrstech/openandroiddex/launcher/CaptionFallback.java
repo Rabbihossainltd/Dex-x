@@ -105,8 +105,10 @@ final class CaptionFallback {
     private final Handler worker;
     private volatile boolean running;
     private int display = -1;
-    /** The topmost task last pass, so its bar can be raised when focus moves. */
-    private int frontTask = -1;
+    /** How long a daemon caption probe is trusted, ms. A dumpsys is not free. */
+    private static final long PROBE_TTL_MS = 4000L;
+    /** Per task: {caption px, uptime of the probe} — see seenCaption(). */
+    private final Map<Integer, long[]> probed = new ConcurrentHashMap<>();
     private long pausedUntil;
     private long hostWaitedSince;
 
@@ -148,11 +150,6 @@ final class CaptionFallback {
     }
 
     private void pass() {
-        // Per TASK, not per session. The real caption is the better renderer
-        // and wins every window it can dress, however the others are doing; a
-        // single window it cannot host must not take the whole desktop off it.
-        // (Withdrawn bars come back the moment the service dresses those tasks
-        // again — see the loop below.)
         boolean service = CaptionService.captionAvailable();
         Context wc = host;
         if (wc == null) return;
@@ -171,59 +168,52 @@ final class CaptionFallback {
         List<WmClient.Task> tasks = wm.list(display);
         if (tasks == null) return;             // daemon away — leave what is up on screen
         int px = Math.round(CAPTION_DP * density(wc));
-        List<Integer> live = new ArrayList<>();
+
         // The bottom-most root task is the desktop itself, and the desktop must never
-        // wear a bar — not the platform's and not ours. CaptionService skips it too; this
-        // is the same rule on the other renderer.
+        // wear a bar — not the platform's and not ours. CaptionService skips it too.
         final int baseId = tasks.isEmpty() ? -1 : tasks.get(tasks.size() - 1).taskId;
-        // Rects of the windows ABOVE the one being handled, in the daemon's topmost-first
-        // order: a bar is only drawn where the platform's caption is actually showing, and
-        // a caption hidden behind a higher window needs no cover.
-        final List<android.graphics.Rect> above = new ArrayList<>();
+
+        // EVERY visible window first, in the daemon's topmost-first order, so the
+        // "is this caption covered" test below can see windows this loop later skips.
+        // (0.7.20 built that list inside the decision loop, so a window skipped for its
+        // package or its size could not occlude — and a bar floated over the window in
+        // front.) A failed probe used to be invisible for the same reason.
+        final List<WmClient.Task> showing = new ArrayList<>();
         for (WmClient.Task t : tasks) {
             if (!t.visible || !t.isFreeform()) continue;
-            if (t.taskId == baseId) continue;
-            if (app.getPackageName().equals(t.pkg)) {
-                // Our own settings and file-transfer windows are ordinary
-                // windows on this display; they get a bar like any other.
-                if (!(SettingsActivity.class.getName().equals(t.activity)
-                        || TaskManagerActivity.class.getName().equals(t.activity)
-                        || FileTransferActivity.class.getName().equals(t.activity))) {
-                    continue;                  // the desktop itself is the background
-                }
+            if (t.taskId != baseId) showing.add(t);
+        }
+
+        List<Integer> live = new ArrayList<>();
+        for (int ix = 0; ix < showing.size(); ix++) {
+            WmClient.Task t = showing.get(ix);
+            if (app.getPackageName().equals(t.pkg) && !isChrome(t)) {
+                continue;                       // the desktop itself is the background
             }
             if (t.right - t.left < 120 || t.bottom - t.top < px + 60) continue;
 
-            // ── WHO DRAWS THIS WINDOW — decided by CaptionRule, tested by running it ──
+            // WHO DRAWS THIS WINDOW — CaptionRule.owner(), which a test drives.
             //
-            // The accessibility renderer puts its bar inside a host window's surface tree,
-            // and the platform's caption is a surface ABOVE the app's: a bar drawn there
-            // can only ever land BELOW the platform's. It was never going to be "the only
-            // bar", however healthy the service was — which is why 0.7.18, by simply
-            // refusing that host, left the platform's caption on screen and nothing of
-            // ours. A bar drawn HERE is a top-level window of the launcher's own, above
-            // every app in the display's z-order: the one thing that can cover a caption.
-            // Both shapes of the platform's caption: the app-bounds inset, which this
-            // renderer can read off the task itself, and a caption WINDOW at the task's
-            // top, which only the accessibility service can see. A display that uses the
-            // second form publishes no inset at all, so reading only the inset (0.7.19)
-            // read "no caption here" on exactly the phone this is for.
-            final int platformPx = Math.max(t.platformCaption(),
-                    CaptionService.platformCaptionHeight(t.taskId));
+            // The accessibility renderer puts its bar inside a host window's surface
+            // tree, and the platform's caption is a surface above the app's: a bar drawn
+            // there always lands BELOW the platform's. A bar drawn HERE is a top-level
+            // window of ours, above every app in the display: the one thing that covers
+            // a caption. Both shapes of the caption are measured — the app-bounds inset
+            // this renderer can read itself, and a caption WINDOW, which needs a witness.
+            final int platformPx = CaptionRule.captionPx(t.platformCaption(), seenCaption(t, service));
             final int barPx = platformPx > 0 ? platformPx : px;
-            // Is this window's caption actually showing, or is it behind a higher window?
-            // An overlay sits above EVERY app, so a bar for a window at the back would
-            // otherwise float over the one in front.
-            android.graphics.Rect capRect = new android.graphics.Rect(t.left, t.top,
+
+            final android.graphics.Rect capRect = new android.graphics.Rect(t.left, t.top,
                     t.right, t.top + Math.max(1, barPx));
             boolean covered = false;
-            for (android.graphics.Rect r : above) {
-                if (android.graphics.Rect.intersects(r, capRect)) {
+            for (int jx = 0; jx < ix; jx++) {   // the windows above this one
+                WmClient.Task a = showing.get(jx);
+                if (android.graphics.Rect.intersects(
+                        new android.graphics.Rect(a.left, a.top, a.right, a.bottom), capRect)) {
                     covered = true;
                     break;
                 }
             }
-            above.add(new android.graphics.Rect(t.left, t.top, t.right, t.bottom));
 
             final int owner = CaptionRule.owner(platformPx, service,
                     CaptionService.stalledTask(t.taskId), covered);
@@ -244,7 +234,8 @@ final class CaptionFallback {
                 if (b == null) continue;
                 bars.put(t.taskId, b);
                 DexLog.step("caption", "fallback bar task=" + t.taskId + " " + t.pkg
-                        + " " + (t.right - t.left) + "x" + (t.bottom - t.top));
+                        + " " + (t.right - t.left) + "x" + (t.bottom - t.top)
+                        + (platformPx > 0 ? " over the platform's " + platformPx + "px" : ""));
             }
             b.sync(t, barPx);
         }
@@ -254,33 +245,37 @@ final class CaptionFallback {
                 bars.remove(b.taskId);
             }
         }
-        // Overlay windows of one process stack in the order they were added, so moving
-        // focus must move our bar with it — otherwise the bar of the window you just
-        // clicked stays under the bar of the one you left.
-        int front = -1;
-        for (WmClient.Task t : tasks) {
-            if (t.visible && t.isFreeform() && live.contains(t.taskId)) {
-                front = t.taskId;
-                break;                                   // topmost first
-            }
-        }
-        if (front != frontTask) {
-            frontTask = front;
-            Bar b = bars.get(front);
-            if (b != null) raise(b);
-        }
     }
 
-    /** Re-add a bar so it stacks above every other bar of ours. */
-    private void raise(Bar b) {
-        try {
-            if (!b.root.isAttachedToWindow()) return;
-            b.wmgr.removeViewImmediate(b.root);
-            b.wmgr.addView(b.root, b.lp);
-            for (Band band : b.bands) band.lift();
-        } catch (Throwable e) {
-            DexLog.warn("caption", "could not raise the bar for task " + b.taskId + ": " + e);
-        }
+    /** One of our own windows that wears a bar like any app window. */
+    private boolean isChrome(WmClient.Task t) {
+        return SettingsActivity.class.getName().equals(t.activity)
+                || TaskManagerActivity.class.getName().equals(t.activity)
+                || FileTransferActivity.class.getName().equals(t.activity);
+    }
+
+    /**
+     * The platform's caption height on this task from a WITNESS, not from the app bounds.
+     *
+     * <p>With the accessibility service bound its window list is the witness. With the
+     * service switched off — the normal state for a sideloaded app on Android 13+ until
+     * "Allow restricted settings" is granted — nothing in this process can see a caption
+     * that is drawn as a window, and the old code guessed 40 dp and left the platform's
+     * own buttons showing under our bar. The daemon can see it (`dumpsys`), so it is
+     * asked, once every few seconds per task: a dumpsys is tens of milliseconds.
+     */
+    private int seenCaption(WmClient.Task t, boolean service) {
+        int fromService = CaptionService.platformCaptionHeight(t.taskId);
+        if (fromService > 0) return fromService;
+        if (service) return 0;                 // the service can see, and it sees nothing
+        long now = SystemClock.uptimeMillis();
+        long[] hit = probed.get(t.taskId);
+        if (hit != null && now - hit[1] < PROBE_TTL_MS) return (int) hit[0];
+        int px = wm.captionProbe(display, t.taskId);
+        probed.put(t.taskId, new long[]{px, now});
+        if (px > 0) DexLog.step("caption", "task " + t.taskId + ": the daemon sees a "
+                + px + "px caption window on it");
+        return px;
     }
 
     private float density(Context c) {
@@ -563,16 +558,6 @@ final class CaptionFallback {
         void remove() {
             try {
                 if (view.isAttachedToWindow()) wmgr.removeViewImmediate(view);
-            } catch (Throwable ignored) {
-            }
-        }
-
-        /** Re-add so the grip travels with its bar when that bar is raised. */
-        void lift() {
-            try {
-                if (!view.isAttachedToWindow()) return;
-                wmgr.removeViewImmediate(view);
-                wmgr.addView(view, lp);
             } catch (Throwable ignored) {
             }
         }
