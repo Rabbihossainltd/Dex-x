@@ -247,8 +247,17 @@ final class CaptionFallback {
         }
         // A closed window's probe cache is dead weight, and a reused task id must be
         // asked about again rather than inherit what the last window with that number
-        // answered.
-        if (probed.size() > bars.size() + 8) probed.keySet().retainAll(bars.keySet());
+        // answered. Against every live task — NOT against `bars` (see ProbeCache).
+        if (ProbeCache.shouldSweep(probed.size(), showing.size())) {
+            ProbeCache.sweep(probed, idsOf(tasks));
+        }
+    }
+
+    /** The task ids on this display, for the probe cache sweep. */
+    private static List<Integer> idsOf(List<WmClient.Task> tasks) {
+        List<Integer> ids = new ArrayList<>(tasks.size());
+        for (WmClient.Task t : tasks) ids.add(t.taskId);
+        return ids;
     }
 
     /** One of our own windows that wears a bar like any app window. */

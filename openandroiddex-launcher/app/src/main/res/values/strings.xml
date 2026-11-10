@@ -50,8 +50,6 @@
     <string name="st_nav_notifications_sub">Phone alerts · Incoming calls</string>
     <string name="st_nav_mouse">Mouse &amp; Cursor</string>
     <string name="st_nav_mouse_sub">Pointer style · Size · Speed</string>
-    <string name="st_nav_touchpad">Touchpad</string>
-    <string name="st_nav_touchpad_sub">Three-finger gestures</string>
     <string name="st_nav_stream">Scrcpy Config</string>
     <string name="st_nav_stream_sub">Resolution · Codec · Performance</string>
     <string name="st_nav_clipboard">Clipboard Manager</string>
@@ -206,7 +204,6 @@
     <string name="lx_snap_title">Snap this window to</string>
     <string name="lx_snap_left">Left half</string>
     <string name="lx_snap_right">Right half</string>
-    <string name="lx_taskbar_autohide">Taskbar auto-hide</string>
     <string name="lx_taskbar_autohide_on">Auto-hide: on</string>
     <string name="lx_taskbar_autohide_off">Auto-hide: off</string>
     <string name="st_window_memory">Remember where windows go</string>
@@ -366,9 +363,6 @@
     <string name="st_fps_value">%1$d fps</string>
     <string name="st_fps_auto">Unlimited</string>
     <string name="st_fps_auto_sub">As fast as the phone can encode</string>
-    <string name="st_audio">Audio</string>
-    <string name="st_audio_forward">Forward audio</string>
-    <string name="st_audio_forward_sub">Play the phone sound through this computer</string>
     <string name="st_restart_note">These are stream settings — they take effect on the next desktop session.</string>
     <string name="st_restart_now">Restart desktop now</string>
     <string name="st_restart_toast">Restarting the desktop…</string>
@@ -431,9 +425,6 @@
     <string name="lx_system_apps">System apps</string>
     <string name="lx_open_apps">Open apps</string>
     <string name="lx_nothing_open">Nothing open</string>
-    <string name="lx_back">Back</string>
-    <string name="lx_home">Home</string>
-    <string name="lx_recent_apps">Recent apps</string>
     <string name="lx_battery_info">Battery info</string>
     <string name="lx_quick_settings">Quick settings</string>
     <string name="lx_fullscreen">Full screen</string>
@@ -510,16 +501,10 @@
     <string name="lx_media_play">Play</string>
     <string name="lx_media_pause">Pause</string>
     <string name="lx_media_next">Next track</string>
-    <string name="st_audio_output">Where sound plays</string>
-    <string name="st_audio_computer_sub">Sound moves to the computer. The phone stays silent.</string>
-    <string name="st_audio_both_sub">Sound comes out of the computer and the phone — this is the default. Costs the phone a little more work.</string>
-    <string name="st_audio_phone_sub">Nothing is sent to the computer. Sound stays on the phone.</string>
-    <string name="st_audio_live_note">Where sound plays changes right away — the one stream setting that needs no restart.</string>
     <string name="lx_sound_output">SOUND OUTPUT</string>
     <string name="lx_media_output">Media output</string>
     <string name="lx_audio_computer">Computer only</string>
     <string name="lx_audio_both">Computer and phone</string>
-    <string name="lx_audio_phone">Phone only</string>
     <string name="lx_output_unknown">Phone speaker</string>
     <string name="lx_output_no_switcher">This phone has no sound output picker to open</string>
     <string name="lx_output_more">All outputs on phone…</string>
@@ -558,7 +543,6 @@
     <string name="lx_hc_stall_body">The phone is not giving Dex-X the window list for the desktop display, so the full title bar cannot be attached. Dex-X has switched to its own simple bar: every window still has minimise, maximise, close and draggable edges, and resize works by dragging a window edge or its bottom right corner.</string>
     <string name="lx_hc_stall_retry">Try the full bar again</string>
     <string name="lx_hc_stall_asked">Dex-X will try the full title bar again shortly</string>
-    <string name="lx_hc_pill_daemon">No title bars</string>
     <string name="lx_hc_ok">Title bars are working</string>
     <string name="lx_hc_service_title">The phone has not enabled window control</string>
     <string name="lx_hc_service_body">Dex-X draws every window title bar and its minimize, maximize and close buttons through an accessibility service, and Android has not switched it on. On Android 13 and later the switch is also hidden for apps installed from a file rather than a store: open App info, tap the three dots, choose Allow restricted settings, then come back here. Without it there is no title bar, no minimize or close, and no resize.</string>
@@ -608,78 +592,14 @@
          name, so every locale repeats it verbatim — like Docker. The prose
          around it still says "Linux" where it means the operating system or the
          session rather than this app. -->
-    <string name="ln_label">LinuxOnDroid</string>
     <!-- Linux: what goes into the container, asked before the download starts -->
-    <string name="ln_apps_title">Choose what to install</string>
-    <string name="ln_apps_body">Ubuntu and the XFCE desktop always go in. Untick anything you do not want and it will not be downloaded.</string>
-    <string name="ln_apps_body_again">Ubuntu and the XFCE desktop are already installed. Tick anything you want added. Unticking does not remove what is already there.</string>
-    <string name="ln_apps_firefox">Firefox</string>
-    <string name="ln_apps_firefox_sub">Web browser from Mozilla. A large download.</string>
-    <string name="ln_apps_chromium">Chromium</string>
-    <string name="ln_apps_chromium_sub">Web browser. A large download.</string>
-    <string name="ln_apps_code">Visual Studio Code</string>
-    <string name="ln_apps_code_sub">Code editor from Microsoft. A large download.</string>
-    <string name="ln_apps_git">Git</string>
-    <string name="ln_apps_git_sub">Small. VS Code needs it for the Source Control panel.</string>
-    <string name="ln_apps_node">Node.js</string>
-    <string name="ln_apps_node_sub">JavaScript runtime with npm. The current LTS release.</string>
-    <string name="ln_apps_gimp">GIMP</string>
-    <string name="ln_apps_gimp_sub">Image editor for photos and graphics. A large download.</string>
-    <string name="ln_apps_intellij">IntelliJ IDEA Community</string>
-    <string name="ln_apps_intellij_sub">Java IDE from JetBrains. The biggest download here.</string>
-    <string name="ln_apps_go">Install</string>
-    <string name="ln_apps_go_none">Install Ubuntu only</string>
-    <string name="ln_apps_menu">Choose Linux apps…</string>
-    <string name="ln_installing">Installing Ubuntu…</string>
-    <string name="ln_waiting">Waiting for the desktop app to start the install…</string>
     <!-- The install screen's controls for the step it is on, and the error screen's Skip
          (LinuxActivity.updateStepRow). %1$s is the app's name as the chooser shows it. -->
-    <string name="ln_step_skip">Skip %1$s</string>
-    <string name="ln_step_restart">Restart this step</string>
-    <string name="ln_step_skip_title">Skip %1$s?</string>
     <!-- %1$s is ln_apps_menu, the Linux tile's menu entry, which already ends in an ellipsis. -->
-    <string name="ln_step_skip_body">It will not be installed, and the rest of Linux goes ahead without it. To add it later, right-click Linux and choose %1$s</string>
-    <string name="ln_step_skip_go">Skip</string>
-    <string name="ln_step_restart_title">Restart this step?</string>
-    <string name="ln_step_restart_body">The step stops and runs again from the beginning. Use this when it seems stuck.</string>
-    <string name="ln_step_restart_go">Restart</string>
-    <string name="ln_step_skipping">Skipping %1$s…</string>
-    <string name="ln_step_restarting">Restarting the step…</string>
-    <string name="ln_starting">Starting Linux desktop…</string>
-    <string name="ln_stage_display">Starting the display server…</string>
-    <string name="ln_stage_services">Starting desktop services…</string>
-    <string name="ln_stage_connecting">Connecting to the desktop…</string>
-    <string name="ln_error">Linux setup failed</string>
-    <string name="ln_connect_failed">Cannot reach the Linux desktop</string>
-    <string name="ln_retry">Retry</string>
-    <string name="ln_cannot_open">Cannot open Linux</string>
-    <string name="ln_reinstall">Reinstall Linux…</string>
-    <string name="ln_reinstall_body">This deletes the Ubuntu container completely — every app you installed and every file inside it — and installs a fresh one. The download is about 1 GB. Nothing outside Linux is affected.</string>
-    <string name="ln_reinstall_go">Delete and reinstall</string>
-    <string name="ln_reinstall_started">Reinstalling Linux. Open the Linux window to watch it.</string>
-    <string name="ln_uninstall">Uninstall Linux…</string>
-    <string name="ln_uninstall_body">This deletes the Ubuntu container and frees the storage it was using — every app you installed and every file inside it. Linux will not reinstall itself; opening Linux again downloads it fresh. Your shared folder is kept, and nothing outside Linux is affected.</string>
-    <string name="ln_uninstall_go">Uninstall</string>
-    <string name="ln_uninstall_done">Linux uninstalled. The storage it was using is free.</string>
-    <string name="ln_session_failed">The Linux session ended unexpectedly</string>
-    <string name="ln_session_failed_sub">Something inside the container stopped it. Starting again gives you a fresh session.</string>
-    <string name="ln_session_ended">You logged out of Linux</string>
-    <string name="ln_session_ended_sub">The session is closed and the container has stopped. Nothing was lost from the installed system.</string>
-    <string name="ln_session_start">Start a session</string>
-    <string name="ln_close_title">Shut down Linux?</string>
-    <string name="ln_close_body">This ends the Ubuntu session and stops the container. Anything unsaved inside it is lost. To put it aside and keep it running, minimise the window instead.</string>
-    <string name="ln_close_cancel">Cancel</string>
-    <string name="ln_close_shutdown">Shut down</string>
     <!-- Same question on the phone, where there is no window to minimise: the
          way to put a session aside is the button beside it. -->
-    <string name="ln_close_body_phone">This ends the Ubuntu session and stops the container. Anything unsaved inside it is lost. Keep running leaves it going in the background, so you can come back to it.</string>
-    <string name="ln_close_keep">Keep running</string>
     <!-- The app-list icon, when the window is already open on the desktop. -->
-    <string name="ln_on_desktop">Linux is already open on the DeX desktop. Close it there to use it on the phone.</string>
-    <string name="ln_shared">Shared folder</string>
-    <string name="ln_shared_grant">Allow access to all files…</string>
     <string name="ln_shared_grant_failed">Cannot open the permission screen</string>
-    <string name="ln_shared_where">Shared folder: %1$s</string>
     <string name="ln_shared_grant_title">Allow access to all files</string>
     <string name="ln_shared_grant_body">The shared folder sits at the top of your internal storage. Android only lets an app create a folder there — or read the files you copy into it — with this permission.
 
@@ -689,266 +609,13 @@ If you switch this off again later, Android force-closes Linux and the desktop r
     <string name="ln_shared_grant_go">Open settings</string>
 
     <!-- ── Docker window ── -->
-    <string name="dk_label">Docker</string>
-    <string name="dk_preparing">Preparing Docker…</string>
-    <string name="dk_installing">Installing Docker…</string>
-    <string name="dk_booting">Starting the Docker machine…</string>
-    <string name="dk_running">Docker engine %1$s</string>
-    <string name="dk_endpoint">Listening on 127.0.0.1:%1$d</string>
-    <string name="dk_stopped">Docker is not running</string>
-    <string name="dk_stopped_sub">Start it to bring the engine and your containers back.</string>
-    <string name="dk_error">Docker setup failed</string>
-    <string name="dk_start">Start</string>
-    <string name="dk_stop">Stop</string>
-    <string name="dk_starting">Starting…</string>
-    <string name="dk_tab_containers">Containers</string>
-    <string name="dk_tab_images">Images</string>
-    <string name="dk_tab_console">Console</string>
-    <string name="dk_engine_down">The engine is not running yet.</string>
-    <string name="dk_no_containers">No containers yet. Use the Console tab to run one.</string>
-    <string name="dk_no_images">No images yet. Pull one from the Console tab.</string>
-    <string name="dk_container_start">Start</string>
-    <string name="dk_container_stop">Stop</string>
-    <string name="dk_container_remove">Remove</string>
-    <string name="dk_remove_title">Remove %1$s?</string>
-    <string name="dk_remove_body">The container and anything written inside it are deleted. Images and volumes are not affected.</string>
-    <string name="dk_cancel">Cancel</string>
-    <string name="dk_action_failed">The engine refused that</string>
     <!-- Volumes. -->
-    <string name="dk_tab_volumes">Volumes</string>
-    <string name="dk_no_volumes">No volumes yet. Docker makes one whenever a container asks for a named mount, and anything written into it outlives the container.</string>
-    <string name="dk_vol_new">New volume</string>
-    <string name="dk_vol_new_hint">Volume name</string>
-    <string name="dk_vol_create">Create</string>
-    <string name="dk_vol_create_failed">Could not create that volume</string>
-    <plurals name="dk_vol_in_use">
-        <item quantity="one">in use by %d container</item>
-        <item quantity="other">in use by %d containers</item>
-    </plurals>
-    <string name="dk_vol_usage">Containers using it</string>
-    <string name="dk_vol_usage_none">Nothing is using this volume.</string>
-    <string name="dk_vol_copy_mount">Copy mount argument</string>
-    <string name="dk_vol_console">Open it in the console</string>
-    <string name="dk_vol_remove_body">The volume and everything written into it are deleted. Containers that used it are left alone.</string>
-    <string name="dk_vol_remove_used">%1$d container is still using this volume. Docker will refuse until it is gone.</string>
-    <string name="dk_vol_remove_failed">Could not remove that volume</string>
-    <string name="dk_v_back">‹ Volumes</string>
-    <string name="dk_v_tab_files">Stored data</string>
-    <string name="dk_v_tab_users">Used by</string>
-    <string name="dk_v_idle">not in use</string>
-    <string name="dk_v_peek_note">Nothing is holding this volume, so there is no process that can see inside it. Starting one to look with — a few seconds on this machine.</string>
-    <string name="dk_v_peek_failed">That container would not start, so there is no way to look inside this volume right now.</string>
-    <string name="dk_v_no_image">Looking inside a volume needs an image to look with, and there are none yet. Pull any small one — alpine will do — and this will work.</string>
-    <string name="dk_v_driver">DRIVER</string>
-    <string name="dk_v_mountpoint">MOUNTPOINT (inside the VM)</string>
-    <string name="dk_v_labels">LABELS</string>
-    <string name="dk_v_options">OPTIONS</string>
     <!-- Containers: the row menu, and the pane behind a row. -->
-    <string name="dk_container_resume">Resume</string>
-    <string name="dk_c_open">Open</string>
-    <string name="dk_c_back">‹ Containers</string>
-    <string name="dk_c_logs">Logs</string>
-    <string name="dk_c_inspect">Inspect</string>
-    <string name="dk_c_files">Files</string>
-    <string name="dk_c_exec">Exec</string>
-    <string name="dk_c_open_browser">Open</string>
-    <string name="dk_col_name">NAME</string>
-    <string name="dk_col_id">CONTAINER ID</string>
-    <string name="dk_col_image">IMAGE</string>
-    <string name="dk_col_ports">PORT(S)</string>
-    <string name="dk_col_cpu">CPU</string>
-    <string name="dk_col_mem">MEMORY</string>
-    <string name="dk_col_actions">ACTIONS</string>
-    <string name="dk_c_cost"> · %1$s%% CPU · %2$s</string>
-    <string name="dk_d_cpu">CPU</string>
-    <string name="dk_d_memory">MEMORY</string>
-    <string name="dk_c_restart">Restart</string>
-    <string name="dk_c_pause">Pause</string>
-    <string name="dk_c_copy_run">Copy docker run</string>
-    <string name="dk_c_console">Shell in the console</string>
-    <string name="dk_c_rename">Rename…</string>
-    <string name="dk_c_rename_hint">New name</string>
-    <string name="dk_c_rename_go">Rename</string>
-    <string name="dk_c_loading">Loading…</string>
-    <string name="dk_c_gone">That container is not there any more.</string>
-    <string name="dk_c_logs_empty">This container has not printed anything yet.</string>
-    <string name="dk_c_logs_exited">Nothing was printed, and the container has stopped — %1$s.\n\nA container lives exactly as long as its command. With no command of your own it runs the default built into the image, and for many images — node among them — that ends the moment there is nothing on standard input. Give it something to run in the Command field of the Run sheet.</string>
-    <string name="dk_c_logs_failed">The engine would not give up the logs for this one.</string>
-    <string name="dk_c_files_up">Up</string>
-    <string name="dk_c_files_empty">This folder is empty.</string>
-    <string name="dk_c_files_stopped">This container is stopped, so there is no process to look through its filesystem with. What follows is what the engine says changed since the image.</string>
-    <string name="dk_c_file_big">That file is %1$s, which is too much to open in a window this size. Read it with head or less in the Exec tab.</string>
-    <string name="dk_c_file_empty">(empty)</string>
-    <string name="dk_c_files_none">Nothing has changed since the image.</string>
-    <string name="dk_c_files_failed">The engine would not list the changes for this one.</string>
-    <string name="dk_c_details_failed">The engine has no details for that container</string>
-    <string name="dk_c_exec_hint">Run a command inside, e.g. ls -la /app</string>
-    <string name="dk_c_exec_silent">(no output)</string>
-    <string name="dk_c_exec_stopped">Exec runs a command inside a container that is already running, and this one has stopped.\n\nStart it first — and if it stops again straight away, give it a command that keeps it alive, because a container lives exactly as long as the thing it runs.</string>
-    <string name="dk_d_name">NAME</string>
-    <string name="dk_d_image">IMAGE</string>
-    <string name="dk_d_state">STATE</string>
-    <string name="dk_d_exit">EXIT CODE</string>
-    <string name="dk_d_error">ERROR</string>
-    <string name="dk_d_started">STARTED</string>
-    <string name="dk_d_finished">FINISHED</string>
-    <string name="dk_d_restart">RESTART POLICY</string>
-    <string name="dk_d_mounts">MOUNTS</string>
-    <string name="dk_d_networks">NETWORKS</string>
-    <string name="dk_d_ip">IP ADDRESS</string>
-    <string name="dk_d_run">DOCKER RUN</string>
     <!-- Images: the row actions, and the sheets behind them. -->
-    <string name="dk_image_run">Run</string>
-    <string name="dk_image_more">More</string>
-    <string name="dk_image_remove">Remove</string>
-    <plurals name="dk_image_in_use">
-        <item quantity="one">in use by %d container</item>
-        <item quantity="other">in use by %d containers</item>
-    </plurals>
-    <string name="dk_image_details">Details</string>
-    <string name="dk_image_usage">Containers from this image</string>
-    <string name="dk_image_pull">Pull again</string>
-    <string name="dk_image_copy_id">Copy image ID</string>
-    <string name="dk_image_console">Run in the console</string>
-    <string name="dk_image_remove_body">The image is deleted from inside the VM. Containers already made from it are left alone.</string>
-    <string name="dk_image_remove_used">%1$d container is still made from this image. Docker will refuse while one is running — stop it first from the Containers tab.</string>
-    <string name="dk_image_remove_failed">Could not remove that image</string>
-    <string name="dk_run_title">Run %1$s</string>
-    <string name="dk_run_name">Container name (optional)</string>
-    <string name="dk_run_ports">Ports, e.g. 8080:80 (optional)</string>
-    <string name="dk_run_volumes">Volumes, e.g. /root/app.js:/app/app.js (optional)</string>
-    <string name="dk_run_env">Environment, one KEY=value per line (optional)</string>
-    <string name="dk_run_command">Command, e.g. node -v (optional)</string>
-    <string name="dk_run_note">Runs in the background, like docker run -d. With no command it uses the default built into the image, which for some images ends immediately — the container will start and stop again. Publish a port and it is reachable on the phone at 127.0.0.1, for these ports: 3000, 3001, 4000, 5000, 5173, 8000, 8080, 8081, 8888, 9000. Anything else is reachable from inside the VM only.</string>
-    <string name="dk_run_failed">Could not run that image</string>
-    <string name="dk_details_failed">The engine has no details for that image</string>
-    <string name="dk_usage_title">Containers from %1$s</string>
-    <string name="dk_usage_none">Nothing has been made from this image yet.</string>
-    <string name="dk_pull_title">Pulling %1$s</string>
-    <string name="dk_pull_body">Downloading into the VM. On a phone this takes a while.</string>
-    <string name="dk_pull_failed">Pull failed</string>
-    <string name="dk_pull_done">Pull complete</string>
-    <string name="dk_copy">Copy</string>
-    <string name="dk_copied">Copied</string>
-    <string name="dk_d_tags">TAGS</string>
-    <string name="dk_d_id">IMAGE ID</string>
-    <string name="dk_d_digest">DIGEST</string>
-    <string name="dk_d_created">CREATED</string>
-    <string name="dk_d_platform">PLATFORM</string>
-    <string name="dk_d_size">SIZE</string>
-    <string name="dk_d_layers">LAYERS</string>
-    <string name="dk_d_entrypoint">ENTRYPOINT</string>
-    <string name="dk_d_command">COMMAND</string>
-    <string name="dk_d_workdir">WORKING DIR</string>
-    <string name="dk_d_ports">EXPOSED PORTS</string>
-    <string name="dk_d_env">ENVIRONMENT</string>
-    <string name="dk_console_hint">Type a command, e.g. docker run hello-world</string>
-    <string name="dk_console_send">Send</string>
-    <string name="dk_console_detached">console not attached</string>
-    <string name="dk_console_silent">the VM is not answering this console — it may still be booting, or another window still holds it</string>
-    <string name="dk_console_not_sent">not sent — %1$s</string>
-    <string name="dk_console_awake">the console is answering after all</string>
-    <string name="dk_console_connecting">still connecting, try again in a moment</string>
-    <string name="dk_close_title">Stop Docker?</string>
-    <string name="dk_close_body">This shuts the whole machine down, so every running container stops with it. Images, volumes and containers themselves are kept. To put this aside and leave your containers running, minimise the window instead.</string>
-    <string name="dk_close_stop">Stop</string>
-    <string name="dk_cannot_open">Cannot open Docker</string>
-    <string name="dk_unsupported">Docker needs Android 9 or newer on a 64-bit device</string>
-    <string name="dk_reinstall">Reset Docker…</string>
-    <string name="dk_reinstall_body">This deletes the Docker machine completely — every image, container and volume inside it — and installs a fresh one. Nothing outside Docker is affected.</string>
-    <string name="dk_reinstall_go">Delete and reset</string>
-    <string name="dk_reinstall_started">Resetting Docker. Open the Docker window to watch it.</string>
-    <string name="dk_died">Docker stopped unexpectedly</string>
-    <string name="dk_died_sub">Android ended the machine, almost always because memory ran low. Start it again to carry on — nothing on its disk was lost.</string>
-    <string name="dk_stage_elapsed">%1$s · %2$ds</string>
-    <string name="dk_s_preparing">Getting ready…</string>
-    <string name="dk_s_downloading">Downloading %1$s</string>
-    <string name="dk_s_boot_image">Building the boot image</string>
-    <string name="dk_s_creating_disk">Creating the virtual disk</string>
-    <string name="dk_s_ready_to_boot">Ready to start</string>
-    <string name="dk_s_kernel">Booting Linux %1$s</string>
-    <string name="dk_s_unpacking">Unpacking Alpine</string>
-    <string name="dk_s_installer">Fetching the installer</string>
-    <string name="dk_s_formatting">Formatting the virtual disk</string>
-    <string name="dk_s_installing">Installing Alpine and Docker — the long one</string>
-    <string name="dk_s_configuring">Configuring the system</string>
-    <string name="dk_s_starting">Starting the system</string>
-    <string name="dk_s_engine_wait">Starting services, waiting for the engine…</string>
 
     <!-- ── Web viewer ── -->
-    <string name="wb_label">Web viewer</string>
-    <string name="wb_subtitle">Open this desktop in a browser on another computer — nothing to install there.</string>
-    <string name="wb_start">Start</string>
-    <string name="wb_stop">Stop</string>
-    <string name="wb_state_on">Serving</string>
-    <string name="wb_state_off">Off</string>
-    <string name="wb_state_off_sub">Start it to get an address you can open, and a code that opens it.</string>
-    <string name="wb_no_viewers">No one connected</string>
-    <plurals name="wb_viewers">
-        <item quantity="one">%d viewer</item>
-        <item quantity="other">%d viewers</item>
-    </plurals>
-    <string name="wb_open_on">Open on another device</string>
-    <string name="wb_no_network">This phone has no network address right now. Join a Wi-Fi network or turn on the hotspot.</string>
-    <string name="wb_copy">Copy</string>
-    <string name="wb_copied">Address copied</string>
-    <string name="wb_if_wifi">Wi-Fi</string>
-    <string name="wb_if_hotspot">Hotspot</string>
-    <string name="wb_if_mobile">Mobile data — usually not reachable from outside</string>
-    <string name="wb_if_wired">Wired / USB</string>
-    <string name="wb_access">Access code</string>
-    <string name="wb_access_note">The browser asks for this once. It is never sent in a link and never shown anywhere else.</string>
-    <string name="wb_new_code">New code</string>
-    <string name="wb_new_code_done">New code set — anyone connected has been signed out</string>
-    <string name="wb_allow_control">Allow control</string>
-    <string name="wb_allow_control_sub">Clicks become touches and typing goes to the focused field. Off leaves a view-only screen.</string>
-    <string name="wb_control_needs_service">Control needs the Open Android DeX accessibility service, which is off. Turn it on in Settings → Accessibility.</string>
-    <string name="wb_allow_files">Allow files</string>
-    <string name="wb_allow_files_sub">Browse and download from the phone, and drop files onto the page to send them here.</string>
-    <string name="wb_files_limited">Without all-files access the page can only send files to Downloads, not browse storage.</string>
-    <string name="wb_picture">Picture</string>
-    <string name="wb_q_720">Up to 720p</string>
-    <string name="wb_q_1080">Up to 1080p</string>
-    <string name="wb_q_native">Full size</string>
-    <string name="wb_fps">Frames per second</string>
-    <string name="wb_bitrate">Bitrate (Mbps)</string>
-    <string name="wb_picture_note">Bigger and faster costs battery and bandwidth. WebRTC adapts downwards on a weak link, so these are ceilings rather than promises.</string>
-    <string name="wb_restart_needed">Stop and start the viewer for that to take effect</string>
-    <string name="wb_security_note">Anyone with the access code can watch and control this phone. The video, the clicks and the files all travel encrypted between the two ends; the screen capture can be stopped at any time from the notification.</string>
-    <string name="wb_notif_starting">Starting…</string>
-    <string name="wb_notif_waiting">Waiting for a viewer</string>
-    <string name="wb_notif_viewers">%1$d watching</string>
-    <string name="wb_err_port">That port is already in use. Pick another one.</string>
-    <string name="wb_err_revoked">Screen capture was stopped, so the viewer stopped with it.</string>
-    <string name="wb_err_consent">Screen capture was not allowed, so there is nothing to show.</string>
-    <string name="wb_err_generic">The viewer could not start.</string>
-    <string name="wb_capture_unavailable">This device has no screen capture</string>
-    <string name="wb_capture_declined">Screen capture was declined — the web viewer needs it</string>
-    <string name="wb_start_failed">Could not start the web viewer</string>
-    <string name="wb_cannot_open">Cannot open the web viewer</string>
 
     <!-- ── Web viewer: WebRTC ── -->
-    <string name="wb_rtc">WebRTC</string>
-    <string name="wb_stun">STUN servers</string>
-    <string name="wb_turn">TURN server</string>
-    <string name="wb_turn_user">TURN username</string>
-    <string name="wb_turn_pass">TURN password</string>
-    <string name="wb_relay_only">Always use the relay</string>
-    <string name="wb_relay_only_sub">Send everything through TURN even when a direct path exists. Costs relay bandwidth, and keeps the two ends from learning each other’s addresses.</string>
-    <string name="wb_rtc_no_turn">No TURN server set — direct paths only</string>
-    <string name="wb_rtc_turn_at">Relay at %1$s</string>
-    <string name="wb_signal">Rendezvous address</string>
-    <string name="wb_signal_sub">A WebSocket URL for openandroiddex-signal, which is in this project and is meant to sit beside your TURN server. Only needed when this phone has no address a browser can open.</string>
-    <string name="wb_room">Room</string>
-    <string name="wb_new_room">New room</string>
-    <string name="wb_new_room_done">New room set — the old link no longer reaches this phone</string>
-    <string name="wb_rtc_link">Rendezvous — works with no inbound route at all</string>
-    <string name="wb_signal_waiting">Waiting at the rendezvous</string>
-    <string name="wb_signal_connecting">Connecting to the rendezvous…</string>
-    <string name="wb_signal_error">The rendezvous cannot be reached</string>
-    <string name="wb_rtc_unavailable">WebRTC could not start on this device — there is nothing to fall back to, so the viewer cannot run here</string>
-    <string name="wb_rtc_starting">Starting WebRTC… a viewer that connects now will wait a moment.</string>
-    <string name="wb_local_only">This address only works on this network. Set a rendezvous below to reach the phone from anywhere.</string>
 
     <!-- ── File transfer ── -->
     <string name="ft_label">File transfer</string>
@@ -1003,99 +670,24 @@ If you switch this off again later, Android force-closes Linux and the desktop r
 
     <!-- Tile menu -->
     <string name="ft_menu_downloads">Open the phone\'s Downloads folder</string>
-    <string name="ft_menu_grant">Allow access to all files</string>
 
     <!-- ── Remote access ── -->
-    <string name="rm_label">Remote access</string>
-    <string name="rm_subtitle">Log in to this Linux from your computer with ssh, on any network. Nothing to set up on a router, and no account.</string>
 
     <!-- The status card -->
-    <string name="rm_state_off">Off</string>
-    <string name="rm_state_off_sub">Turn it on, and the computers you pair can reach Ubuntu on this phone from anywhere: home, work, or with the phone on mobile data.</string>
-    <string name="rm_state_starting">Starting…</string>
-    <string name="rm_state_online">Reachable from anywhere</string>
-    <string name="rm_state_offline">On, waiting for a network</string>
-    <string name="rm_turn_on">Turn on</string>
-    <string name="rm_turn_off">Turn off</string>
-    <string name="rm_linux_missing">Linux is not installed yet. Open Linux once to install it, and computers can connect as soon as it is ready.</string>
-    <string name="rm_open_linux">Open Linux</string>
-    <string name="rm_linux_installing">Linux is still being set up. Computers can connect when it finishes.</string>
-    <string name="rm_linux_error">Linux did not finish setting up. Open Linux to try again, and computers can connect once it is done.</string>
-    <string name="rm_ssh_install_failed">The SSH server could not be installed in Linux. Check the phone\'s connection, then turn remote access off and on to try again.</string>
-    <string name="rm_ssh_starting">Starting the SSH server inside Linux…</string>
-    <string name="rm_ssh_failed">The SSH server inside Linux would not start. Reinstalling Linux usually fixes this; your files in the shared folder are kept.</string>
-    <string name="rm_battery">Android can pause remote access when the screen is off. Let it keep running in the background so computers can always reach the phone.</string>
-    <string name="rm_battery_allow">Allow</string>
-    <string name="rm_battery_desktop">On the phone, open Settings → Apps → %1$s → Battery and choose Unrestricted.</string>
-    <string name="rm_unavailable">Remote access needs a 64-bit phone, like Linux itself.</string>
-    <plurals name="rm_sessions">
-        <item quantity="one">%d computer connected now</item>
-        <item quantity="other">%d computers connected now</item>
-    </plurals>
-    <plurals name="rm_paired_count">
-        <item quantity="one">%d computer paired · none connected</item>
-        <item quantity="other">%d computers paired · none connected</item>
-    </plurals>
 
     <!-- The computers -->
-    <string name="rm_computers">Computers</string>
-    <string name="rm_no_computers">No computers yet. Add one and only that computer can get in.</string>
-    <string name="rm_add">Add a computer</string>
-    <string name="rm_remove">Remove</string>
-    <string name="rm_remove_title">Remove %1$s?</string>
-    <string name="rm_remove_body">It is disconnected straight away, and can only get back in by pairing again.</string>
-    <string name="rm_connected_direct">Connected now · direct · %1$d ms</string>
-    <string name="rm_connected_relay">Connected now · through a relay · %1$d ms</string>
-    <string name="rm_paired_when">Paired %1$s</string>
-    <string name="rm_os_windows" translatable="false">Windows</string>
-    <string name="rm_os_macos" translatable="false">macOS</string>
-    <string name="rm_os_linux" translatable="false">Linux</string>
-    <string name="rm_os_other">Computer</string>
 
     <!-- Add a computer -->
-    <string name="rm_code_title">Type this code on your computer</string>
-    <string name="rm_code_preparing">Getting a code ready…</string>
-    <string name="rm_code_expires">Expires in %1$s</string>
-    <string name="rm_code_how_app">In Open Android DeX on the computer, click Phone Linux and type it there.</string>
-    <string name="rm_code_how_cli">No app on that computer? Run: dexremote pair %1$s</string>
-    <string name="rm_cancel">Cancel</string>
-    <string name="rm_paired_ok">%1$s can now reach this Linux.</string>
-    <string name="rm_paired_how">On it, run: ssh %1$s</string>
-    <string name="rm_done">Done</string>
-    <string name="rm_pair_failed_bad_code">The computer typed a different code, so nothing was saved.</string>
-    <string name="rm_pair_failed_expired">The code expired before a computer used it.</string>
-    <string name="rm_pair_failed_other">Pairing did not finish.</string>
-    <string name="rm_try_again">New code</string>
 
     <!-- Connecting -->
-    <string name="rm_connect">From a paired computer</string>
-    <string name="rm_connect_terminal">In any terminal</string>
-    <string name="rm_connect_vscode">In VS Code: Remote-SSH, then %1$s</string>
-    <string name="rm_copy">Copy</string>
-    <string name="rm_copied">Copied</string>
-    <string name="rm_host_key">User root · host key %1$s</string>
-    <string name="rm_phone_id">Phone ID %1$s</string>
-    <string name="rm_security_note">Only computers you pair can connect. Each one proves its own key before anything reaches Linux, and SSH checks a second key after that. Connections go straight between the two devices whenever the networks allow it, and otherwise through a public relay that passes them on without being able to read them.</string>
 
     <!-- The ongoing notification -->
-    <string name="rm_note_on">Remote access on · reachable from anywhere</string>
-    <string name="rm_note_offline">Remote access on · offline</string>
-    <plurals name="rm_note_connected">
-        <item quantity="one">Remote access on · %d computer connected</item>
-        <item quantity="other">Remote access on · %d computers connected</item>
-    </plurals>
-    <string name="rm_note_settings">Remote access</string>
-    <string name="rm_note_turn_off">Turn off</string>
-    <string name="rm_note_resume">Remote access is paused — tap to resume</string>
 
     <!-- The Linux tile's menu -->
-    <string name="ln_remote_menu">Remote access…</string>
 
     <!-- ── Linux app windows ── -->
     <!-- A Linux app opens as a window of its own; the toast while it starts. -->
-    <string name="lw_opening">Opening %1$s…</string>
     <!-- The taskbar menu of a Linux app's window: asks the app to close it. -->
-    <string name="lw_close_window">Close window</string>
 
     <!-- The in-app update prompt (UpdateCheck): a newer build exists, and the
          answer is a link to it, never an install. -->

@@ -1747,7 +1747,6 @@ public final class WmDaemon {
             return -1;
         }
     }
-    /** Run a shell command with this process's own authority, stdout back. */
     /** How long one dumpsys is reused, ms. It takes a few hundred on a mid-range phone. */
     private static final long DUMP_TTL_MS = 2000L;
     private static String dumpText;
@@ -1772,6 +1771,7 @@ public final class WmDaemon {
         return dumpText;
     }
 
+    /** Run a shell command with this process's own authority, stdout back. */
     private static String sh(String cmd) {
         if (cmd == null || cmd.trim().isEmpty()) return "";
         try {

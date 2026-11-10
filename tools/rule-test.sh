@@ -12,5 +12,7 @@ src="$here/openandroiddex-launcher/app/src/main/java/com/ccrstech/openandroiddex
 test="$here/openandroiddex-launcher/app/src/test/java/com/ccrstech/openandroiddex/launcher"
 out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT
-javac -encoding UTF-8 -d "$out" "$src/CaptionRule.java" "$test/CaptionRuleTest.java"
+javac -encoding UTF-8 -d "$out" "$src/CaptionRule.java" "$src/ProbeCache.java" \
+    "$test/CaptionRuleTest.java" "$test/ProbeCacheTest.java"
 java -cp "$out" com.ccrstech.openandroiddex.launcher.CaptionRuleTest
+java -cp "$out" com.ccrstech.openandroiddex.launcher.ProbeCacheTest

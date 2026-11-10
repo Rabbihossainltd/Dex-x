@@ -22,6 +22,8 @@ TAURI_UI = ROOT / "open-android-dex-tauri/src"
 results = []
 
 
+
+
 def check(name, ok, detail=""):
     results.append((bool(ok), name, detail))
 
@@ -37,6 +39,38 @@ def launcher(name):
 def rust(name):
     return read(RUST / name)
 
+
+# ── dead resources ──────────────────────────────────────────────────────────
+# A string nobody reads is bytes in every APK and text a translator has to keep
+# alive. The scan has to cover every shape a resource id is spelled in, or a live
+# string is deleted and the app dies at runtime with Resources.NotFoundException:
+#   R.string.n, R.plurals.n, @string/n, @plurals/n — and an int[] of ids still
+#   spells R.string.n element by element, so the same pattern catches it. What
+#   would NOT be caught is a computed id (getIdentifier); audit checks below
+#   assert that no such lookup exists for strings.
+RES = ROOT / "openandroiddex-launcher/app/src/main/res"
+
+
+def _named_resources():
+    return set(re.findall(r'<(?:string|plurals|string-array|array)\s+name="([a-z_0-9]+)"',
+                          read(RES / "values/strings.xml")))
+
+
+def _referenced_resources():
+    refs = set()
+    pat = re.compile(r"R\.(?:string|plurals|array)\.[a-z_0-9]+"
+                     r"|@(?:string|plurals|array)/[a-z_0-9]+")
+    for p in ROOT.rglob("*"):
+        if not p.is_file() or p.suffix not in (".java", ".kt", ".xml"):
+            continue
+        if "/build/" in str(p) or "/.git/" in str(p):
+            continue
+        for m in pat.finditer(read(p)):
+            refs.add(re.split(r"[./]", m.group(0))[-1])
+    return refs
+
+
+dead_strings = sorted(_named_resources() - _referenced_resources())
 
 # ── 1. the pointer: the computer's by default ────────────────────────────────
 app_tsx = read(TAURI_UI / "App.tsx")
@@ -488,9 +522,10 @@ check("bookkeeping: the purge is triggered by whichever map grew first",
       and "if (widest > stack.size() + 4) {" in caption_service,
       "CaptionService purge")
 
-check("bookkeeping: the probe cache forgets windows that are gone",
-      "if (probed.size() > bars.size() + 8) probed.keySet().retainAll(bars.keySet());" in fallback,
-      "CaptionFallback.probed")
+check("bookkeeping: the probe cache forgets closed windows AND KEEPS live undecorated ones",
+      "ProbeCache.sweep(probed, idsOf(tasks))" in fallback
+      and "retainAll(bars.keySet())" not in fallback,
+      "a prune against `bars` throws away every window the service decorates")
 
 check("daemon: one dumpsys serves every task in a probe cycle",
       "private static synchronized String windowDump()" in read(ROOT / "openandroiddex-wmd/src/com/ccrstech/openandroiddex/wmd/WmDaemon.java")
@@ -505,6 +540,10 @@ check("protocol: the wire test runs in CI too",
       "run: python3 tools/protocol-test.py" in ci
       and (ROOT / "tools/protocol-test.py").exists(),
       ".github/workflows/dex-x.yml")
+
+check("resources: every string in values/ is read by something",
+      not dead_strings,
+      f"{len(dead_strings)} unread: " + ", ".join(dead_strings[:6]))
 
 # ── 10. versions agree everywhere ───────────────────────────────────────────
 gradle = read(ROOT / "openandroiddex-launcher/app/build.gradle")

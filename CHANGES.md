@@ -128,6 +128,57 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.23 — re-verified 0.7.22, found a bug in one of its own fixes, and cut 182 KB
+
+The user asked for the audit again. Checking it by a different method — reading the diff
+instead of the changelog — found that **one of 0.7.22's fixes was wrong**, and that one of
+0.7.22's *retractions* was still imprecise.
+
+### What was wrong with my own fix
+
+The probe-cache prune I added in 0.7.22 was `probed.keySet().retainAll(bars.keySet())`.
+`bars` holds the windows **our** renderer draws a bar for. `probed` holds every window that
+was ever measured — including the ones `CaptionRule` hands to the accessibility service, which
+never own a bar. So the prune threw away live entries on every pass against a list that could
+never contain them, and the 4-second TTL became a probe every pass. The line looked right;
+only the two maps' definitions tell you it is not.
+
+Now `ProbeCache` — its own class, no Android in it, so a test can drive it. The sweep is
+against the *live task list*, not against our bars. 11 cases in `ProbeCacheTest`, and the audit
+fails if the prune ever names `bars` again (proven by putting the old line back).
+
+### The second retraction, corrected again
+
+I wrote that `openandroiddex-signal/` was "genuinely unreferenced". Not so: `doc/web-viewer.md`
+documents it in three places — how it is run, what it does, a race its own tests caught. It is a
+server the user runs, which is why no build step touches it. What *was* stale is its interface
+text in the app.
+
+### 182 KB of text nothing reads
+
+A resource scan — every `R.string.`, `@string/`, `R.plurals`, `@plurals`, and id arrays — found
+**322 named resources with no reference of any kind** in the launcher: the whole web-viewer
+dialog set (there is no `WebView` in this codebase), the Docker console strings, and their
+shared dialogs. Verified unreachable before deleting: no `getIdentifier` for strings, no
+computed ids, every id read as a literal.
+
+| | bytes | |
+| --- | --- | --- |
+| v0.7.22 | 841,396 | |
+| − dead strings | **659,264** | −182,132, −21.6% |
+
+A first, smaller attempt cut only the web-viewer set (−54,084). The rest is the Docker and
+dialog text, in eight translations plus English.
+
+### Also
+
+- The `sh()` javadoc had ended up on top of `DUMP_TTL_MS`; it belongs on `sh()`. Moved back.
+- `tools/audit.py` grew a permanent check: **every string in `values/` must be read by
+  something**. Proven to fail by re-adding one.
+- `doc/removed-strings.md` records all 322 names, so nothing is lost silently.
+
+Suite counts: audit **78/78**, rule **32/32**, probe cache **11/11**, dump **9/9**, protocol **6/6**.
+
 ## v0.7.22 — the audit's own mistakes, and the wire that had no test
 
 Ran the audit again and fixed what was left. Two of the previous audit's findings turned out
