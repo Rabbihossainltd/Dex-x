@@ -1765,7 +1765,7 @@ public final class WmDaemon {
      * drawn, and a window that gains or loses a caption must be seen by the next parse.
      */
     private static synchronized String windowDump() {
-        long now = SystemClock.uptimeMillis();
+        long now = android.os.SystemClock.uptimeMillis();
         if (dumpText != null && now - dumpAt >= 0 && now - dumpAt < DUMP_TTL_MS) return dumpText;
         dumpText = sh("dumpsys window windows");
         dumpAt = now;
