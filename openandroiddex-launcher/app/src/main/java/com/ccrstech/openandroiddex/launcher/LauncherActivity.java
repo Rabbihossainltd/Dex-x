@@ -333,6 +333,8 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     private boolean drawerShown = false;
     /** true while the drawer is attached as its own always-on-top window. */
     private boolean drawerOverlay = false;
+    /** The drawer's overlay params while it is up, so its focus flag can be changed. */
+    private WindowManager.LayoutParams drawerOverlayLp;
     private FrameLayout rootFrame;
     /** Desktop icon grid — the drop target for drags out of the drawer. */
     private DesktopGrid desktopGrid;
@@ -2656,6 +2658,11 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
     private EditText newSearchField(String hint) {
         EditText search = new EditText(this);
         searchField = search;
+        // Touching the field is the request for the keyboard — see giveDrawerKeyboard.
+        search.setOnTouchListener((v, e) -> {
+            if (e.getActionMasked() == MotionEvent.ACTION_DOWN) giveDrawerKeyboard();
+            return false;                            // the field still handles the tap
+        });
         search.setHint(hint);
         search.setHintTextColor(theme.textFaint);
         search.setTextColor(theme.text);
@@ -4399,9 +4406,24 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
                     // less the taskbar strip it must stop short of.
                     Math.max(dp(200), size.y - topSystemInset() - bottomReserve()),
                     WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                    // NOT FOCUSABLE, and that is the whole of the navigation-bar bug.
+                    //
+                    // A focusable overlay takes window focus from the activity, and the
+                    // activity's hidden system bars come back the moment it does: hiding
+                    // bars is something only an ACTIVITY's window can ask for, and a
+                    // TYPE_APPLICATION_OVERLAY window cannot ask. The taskbar overlay has
+                    // always carried FLAG_NOT_FOCUSABLE; the drawer never did, so opening
+                    // the app drawer put the navigation bar back on screen — "navigation
+                    // bar ashe app button a click korle" — and closing it took the bar
+                    // away again.
+                    //
+                    // The search field cannot type while this is set, so it takes the
+                    // keyboard on demand instead: see giveDrawerKeyboard().
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                            | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                     PixelFormat.TRANSLUCENT);
             lp.gravity = Gravity.TOP;
+            drawerOverlayLp = lp;
             // The drawer is the biggest translucent surface we own — blur is
             // what makes it read as glass rather than as a dimmed screenshot.
             //
@@ -4450,7 +4472,39 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         // The bar stays up while the drawer is open — see pinTaskbar.
         pinTaskbar();
         searchField.setText("");
-        searchField.requestFocus();
+        // NOT requestFocus() here. The drawer's overlay is deliberately not focusable
+        // (see showDrawer), so asking a view for focus cannot reach the keyboard anyway —
+        // and if the window is ever fixed, this line would bring the system bars back on
+        // every open. Typing is asked for by tapping the field.
+    }
+
+    /**
+     * Give the drawer's overlay the keyboard.
+     *
+     * <p>The window is not focusable while the drawer is up, because a focusable overlay
+     * takes focus from the activity and the system bars come back with it. Typing has to
+     * be asked for, so it is: the first touch on the search field drops
+     * FLAG_NOT_FOCUSABLE, asks the field for focus and lets the IME up. Closing the drawer
+     * removes the window, so the flag never has to be put back.
+     */
+    private void giveDrawerKeyboard() {
+        if (!drawerOverlay || drawerOverlayLp == null) {
+            // In-activity drawer: the activity already has the keyboard and its own
+            // hidden bars, so there is nothing to ask for.
+            if (searchField != null) searchField.requestFocus();
+            return;
+        }
+        if ((drawerOverlayLp.flags & WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0) {
+            return;                                  // already has it
+        }
+        drawerOverlayLp.flags &= ~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+        try {
+            getWindowManager().updateViewLayout(drawer, drawerOverlayLp);
+        } catch (Exception e) {
+            DexLog.warn("taskbar", "the drawer could not take the keyboard", e);
+            return;
+        }
+        if (searchField != null) searchField.requestFocus();
     }
 
     /**
@@ -4513,7 +4567,9 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         if (!drawerShown) showDrawer();
         startAllApps = true;
         updateStartMode();
-        if (searchField != null) searchField.requestFocus();
+        // Through the same door as a tap on the field: the drawer's overlay is not
+        // focusable until typing is actually asked for.
+        giveDrawerKeyboard();
     }
 
     void dismissPopups() {

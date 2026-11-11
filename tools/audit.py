@@ -583,6 +583,20 @@ check("home: the platform's caption on the desktop is covered when it cannot be 
       and "setOnClickListener(v -> { })" in fallback,
       "the cover must swallow touches or the platform's buttons stay pressable under it")
 
+check("bars: the app drawer does not take window focus from the desktop",
+      "WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL\n                            | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE," in launcher("LauncherActivity.java"),
+      "a focusable overlay takes focus from the activity, and the hidden system bars come back")
+
+check("bars: the drawer asks for the keyboard on demand instead",
+      "private void giveDrawerKeyboard()" in launcher("LauncherActivity.java")
+      and "private void showStartSearching()" in launcher("LauncherActivity.java")
+      and "giveDrawerKeyboard();\n    }" in launcher("LauncherActivity.java").split("private void showStartSearching()")[1][:300],
+      "the search field must still be typeable")
+
+check("bars: the drawer's keyboard path cannot recurse",
+      "giveDrawerKeyboard();\n            return;\n        }" not in launcher("LauncherActivity.java"),
+      "a self-call inside its own fallback branch")
+
 check("bars: the launcher window goes edge to edge before hiding the system bars",
       "getWindow().setDecorFitsSystemWindows(false);" in launcher("LauncherActivity.java"),
       "hide() alone leaves the bar's strip reserved, and the gap shows as black")

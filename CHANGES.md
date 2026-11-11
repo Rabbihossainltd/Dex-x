@@ -128,6 +128,48 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.29 — the navigation bar, found by comparing two windows that already existed
+
+Asked to check again, and this time the answer was already in the file: the taskbar's overlay
+window and the drawer's overlay window, eleven hundred lines apart, did not have the same flags.
+
+```java
+// taskbar
+WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+// drawer
+WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+```
+
+A **focusable** overlay takes window focus from the activity it floats over. Hiding the system
+bars is something only an activity's window can ask for, and a `TYPE_APPLICATION_OVERLAY`
+window cannot ask — so the moment the drawer opens and takes focus, the bars the desktop hid
+come back. Close the drawer and the desktop regains focus and hides them again.
+
+That is exactly the report: *"navigation bar ashe app button a click korle"* — the app button
+opens the drawer.
+
+The drawer now carries `FLAG_NOT_FOCUSABLE` like the taskbar does, and typing is asked for
+instead of assumed: the first touch on the search field drops the flag, takes the keyboard and
+lets the IME up. `showStartSearching()` — the "type to search" path — goes through the same
+door. The old unconditional `searchField.requestFocus()` on open is gone, because a focus
+request from a non-focusable window cannot reach the keyboard and would be the first thing to
+bring the bars back if the flag were ever dropped again.
+
+Three audit checks were added for this, one of them proven to fail by putting the flag back.
+
+### The other reports, checked again rather than re-fixed
+
+- **The home's caption.** The cover is reached: `CaptionFallback.attach()` is called
+  unconditionally when the shelf is built, and `coverHome()` runs inside `pass()` before any
+  early return. Its probe is now the daemon's, not the service's — see 0.7.28.
+- **Clicking outside a window minimising it.** I could not find a cause I would stand behind.
+  Nothing in the launcher, and nothing in the PC's enforcer, hides a task on focus loss;
+  `onDesktopTapped()` only sends the *desktop* to the back. The tile now survives either way
+  (0.7.26), but the window's own behaviour I have not explained, and I am not going to ship
+  another guess at it.
+
+Suites: audit **97/97**, rule **32/32 + 6**, probe cache **11/11**, dump **9/9**, protocol **6/6**.
+
 ## v0.7.28 — why the last four releases changed nothing, and what ends that
 
 Five releases of fixes and the phone behaved identically. That is not five wrong fixes; it is
