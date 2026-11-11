@@ -115,10 +115,26 @@ final class CaptionFallback {
         final int display;
         long goneSince;                        // first pass it was missing, 0 = present
         long askedAt;                          // last time the daemon was asked
+        /** How many times it has been asked and still existed — see {@link #askDelay}. */
+        int asks;
 
         Hid(String pkg, int display) {
             this.pkg = pkg;
             this.display = display;
+        }
+
+        /**
+         * How long to wait before asking the daemon again.
+         *
+         * <p>On the phones where a hidden task drops out of the root list, the window is
+         * missing from every pass while it is minimised — a window can be minimised for
+         * hours. Asking every two and a half seconds for that long is a socket round trip
+         * every two and a half seconds, forever, to learn the same answer. It doubles to a
+         * minute instead, and a single answer of "gone" ends it.
+         */
+        long askDelay() {
+            int shift = Math.min(asks, 5);                 // 2.5s, 5, 10, 20, 40, 60
+            return Math.min(60_000L, GRACE_FORGET_MS << shift);
         }
     }
 
@@ -134,7 +150,25 @@ final class CaptionFallback {
         watchers.remove(r);
     }
 
+    /**
+     * Watchers rebuild the taskbar, and a taskbar is views — so every notification
+     * lands on the main thread, whatever thread noticed the change.
+     *
+     * <p>Both the hide and the reconcile run on this class's worker thread; only a tile
+     * click arrives on the main thread. Calling a view-touching watcher straight from
+     * the worker is `CalledFromWrongThreadException` at the next minimise — which is
+     * exactly the path this whole feature exists to serve, so "it works when I look at
+     * the tidy case" would have been a crash in the only case that mattered.
+     */
     private static void notifyWatchers() {
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            main.post(CaptionFallback::fireWatchers);
+            return;
+        }
+        fireWatchers();
+    }
+
+    private static void fireWatchers() {
         for (Runnable r : watchers) {
             try {
                 r.run();
@@ -143,6 +177,10 @@ final class CaptionFallback {
             }
         }
     }
+
+    /** The main looper, for handing work back to the thread that owns the views. */
+    private static final android.os.Handler main =
+            new android.os.Handler(android.os.Looper.getMainLooper());
 
     /** Packages with a window we hid that is still open — for the taskbar. */
     static java.util.Set<String> hiddenPackages() {
@@ -165,7 +203,9 @@ final class CaptionFallback {
         for (Map.Entry<Integer, Hid> e : f.hidden.entrySet()) {
             if (!pkg.equals(e.getValue().pkg)) continue;
             final int id = e.getKey();
-            final int display = e.getValue().display;
+            // The live display, not the one recorded at hide time: a reconnect gives the
+            // desktop a new id, and showing a window on the old one does nothing.
+            final int display = f.display >= 0 ? f.display : e.getValue().display;
             f.hidden.remove(id);
             f.worker.post(() -> f.wm.show(display, id));
             notifyWatchers();
@@ -209,6 +249,9 @@ final class CaptionFallback {
 
     void stop() {
         running = false;
+        // A reconnect creates a NEW display id. Keeping the old one meant every later
+        // list() asked about a display that no longer exists and returned null forever.
+        display = -1;
         worker.post(() -> {
             for (Bar b : new ArrayList<>(bars.values())) remove(b);
             bars.clear();
@@ -330,9 +373,11 @@ final class CaptionFallback {
         // A closed window's probe cache is dead weight, and a reused task id must be
         // asked about again rather than inherit what the last window with that number
         // answered. Against every live task — NOT against `bars` (see ProbeCache).
-        if (ProbeCache.shouldSweep(probed.size(), showing.size())) {
-            ProbeCache.sweep(probed, idsOf(tasks));
-        }
+        // One guard, inside ProbeCache, against the list the sweep actually uses.
+        // Checking here with `showing` and sweeping there with `tasks` meant the outer
+        // test could pass and the inner one still refuse, because `tasks` is never
+        // smaller than `showing` — a guard that quietly stopped guarding.
+        ProbeCache.sweep(probed, idsOf(tasks));
 
         // The windows WE hid: a task that is visible again came back on its own (or
         // something else un-hid it), and a task the daemon no longer has is closed.
@@ -351,8 +396,10 @@ final class CaptionFallback {
                 Hid h = e.getValue();
                 if (t == null) {
                     if (h.goneSince == 0) h.goneSince = now;
-                    else if (now - h.goneSince > GRACE_FORGET_MS && now - h.askedAt > GRACE_FORGET_MS) {
+                    else if (now - h.goneSince > GRACE_FORGET_MS
+                            && now - h.askedAt > h.askDelay()) {
                         h.askedAt = now;
+                        h.asks++;
                         Boolean alive = wm.has(e.getKey());
                         if (Boolean.FALSE.equals(alive)) {
                             hidden.remove(e.getKey());

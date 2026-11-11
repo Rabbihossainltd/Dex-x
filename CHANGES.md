@@ -128,6 +128,47 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.25 — checking 0.7.24 found a crash in it
+
+Asked to check everything again. Reading the code I wrote one release earlier — rather than
+the notes about it — found that **0.7.24's own fix would throw on the path it was written
+for.**
+
+### The crash
+
+`CaptionFallback` notices a hide on its worker thread and told its watchers from there. The
+watcher is `refreshOpenApps()`, which calls `openAppsRow.removeAllViews()` and adds tiles:
+views, owned by the main thread. Android throws `CalledFromWrongThreadException` for exactly
+that. So the sequence "minimise a window with the accessibility service off" — the one case
+the whole feature exists to serve — was a crash, not a fix.
+
+Found by asking one question of the new code: *which thread is this on?* Nothing in the build
+or the tests would have said so; `OwnWindows.java` even states the rule in its header
+("Main thread only"), which is where the answer was.
+
+`notifyWatchers()` now hops to the main looper unless it is already on it, and the audit
+fails if that hop is ever removed (proven by removing it).
+
+### Two smaller ones found in the same pass
+
+- **Two guards that disagreed.** The probe sweep was gated on `showing.size()` outside
+  `ProbeCache` and on `tasks.size()` inside it. `tasks` is never smaller than `showing`, so
+  the outer test could pass and the inner one still refuse — a guard that stops guarding.
+  One call now, guarding against the list it sweeps.
+- **A reconnect left the fallback on a dead display.** `display` was resolved once and never
+  reset, so after a reconnect — which creates a new display id — every `list()` asked about a
+  display that no longer existed and returned null forever. Reset on `stop()`; a restore uses
+  the live display rather than the id recorded at hide time.
+
+### And a cost
+
+A window can be minimised for hours, and on the phones where a hidden task drops out of the
+root list it is missing from every pass. The reconcile asked the daemon "is it still there?"
+every 2.5 s for as long as that lasted. The delay now doubles to a minute, and one answer of
+"gone" ends it.
+
+Suites: audit **85/85**, rule **32/32**, probe cache **11/11**, dump **9/9**, protocol **6/6**.
+
 ## v0.7.24 — the two questions, answered by reading the code (and two bugs in the answer)
 
 Asked to check whether the desktop home wears a caption bar, and whether a recently opened

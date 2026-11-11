@@ -549,6 +549,16 @@ check("taskbar: our own package is not drawn by the running-apps loop",
       "if (getPackageName().equals(pkg)) continue;" in launcher("LauncherActivity.java"),
       "resolveOpenPackage() resolves our own package, so the loop drew a second tile")
 
+check("threads: the fallback's notifications reach the main thread",
+      "android.os.Looper.myLooper() != android.os.Looper.getMainLooper()" in fallback
+      and "main.post(CaptionFallback::fireWatchers);" in fallback,
+      "its watcher rebuilds the taskbar, and a view touched off the main thread throws")
+
+check("threads: the probe sweep is guarded once, against the list it sweeps",
+      "ProbeCache.sweep(probed, idsOf(tasks));" in fallback
+      and "ProbeCache.shouldSweep(probed.size(), showing.size())" not in fallback,
+      "two guards disagreeing is a guard that stops guarding")
+
 check("taskbar: a window the fallback minimised keeps its tile",
       "next.addAll(CaptionFallback.hiddenPackages());" in launcher("LauncherActivity.java")
       and "static java.util.Set<String> hiddenPackages()" in fallback
