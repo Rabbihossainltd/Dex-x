@@ -61,14 +61,3 @@ powershell -ExecutionPolicy Bypass -File tools\build-windows.ps1
 ```
 
 ---
-
-## Credit
-
-Dex-X is a modified build of **[Open Android DeX](https://github.com/dotnetdreamer/open-android-dex)**
-by **Idrees Khan** and its contributors, which is where the desktop, the window
-daemon, the launcher and the whole architecture come from. That project is
-GPL-3.0; so is this one, and it has to be — see `LICENSE` and `NOTICE.md`.
-
-What is different here is listed, change by change, in `CHANGES.md`.
-
-Nothing here is derived from any commercial product's source.
