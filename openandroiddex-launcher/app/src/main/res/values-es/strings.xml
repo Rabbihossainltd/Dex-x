@@ -23,7 +23,7 @@
         <item quantity="one">%d app</item>
         <item quantity="other">%d apps</item>
     </plurals>
-    <string name="caption_service_description">Dibuja la barra de título en las ventanas del escritorio. Open Android DeX lo necesita para colocar una barra dentro de cada ventana; no lee ni transmite el contenido de las ventanas.</string>
+    <string name="caption_service_description">Dibuja la barra de título en las ventanas del escritorio. Dex-X lo necesita para colocar una barra dentro de cada ventana; no lee ni transmite el contenido de las ventanas.</string>
 
     <string name="st_title">Ajustes de DeX</string>
     <string name="st_search">Buscar ajustes</string>
@@ -139,7 +139,7 @@
     <string name="st_icons_medium">Mediano</string>
     <string name="st_icons_large">Grande</string>
     <string name="st_home_app">App de inicio</string>
-    <string name="st_home_app_yes">Open Android DeX</string>
+    <string name="st_home_app_yes">Dex-X</string>
     <string name="st_home_app_yes_sub">Inicio y el gesto de deslizar hacia arriba vuelven al escritorio.</string>
     <string name="st_home_app_no">El launcher del teléfono</string>
     <string name="st_home_app_no_sub">Inicio y el gesto de deslizar hacia arriba salen del escritorio. Toca para cambiarlo.</string>
@@ -250,7 +250,7 @@
     <string name="st_scope_cursor">Ratón y cursor</string>
     <string name="st_scope_display">Tamaño de pantalla e idioma</string>
     <string name="st_resources">Recursos de desarrollo</string>
-    <string name="st_res_repo">Open Android DeX en GitHub</string>
+    <string name="st_res_repo">Dex-X en GitHub</string>
     <string name="st_res_repo_sub">App de escritorio, launcher y daemon de ventanas</string>
     <string name="st_res_daemon">Código del daemon de ventanas</string>
     <string name="st_res_daemon_sub">El servicio shell-uid detrás de las barras de título</string>
@@ -284,7 +284,7 @@
     <string name="lx_pad_reverse">Invertido</string>
     <string name="lx_pad_foot">Un ratón o teclado conectado al teléfono sigue funcionando con normalidad.</string>
     <string name="lx_pad_no_overlay">El panel táctil necesita permiso para mostrarse sobre otras aplicaciones.</string>
-    <string name="lx_pad_no_service">El puntero no puede hacer clic hasta que actives Open Android DeX en Accesibilidad.</string>
+    <string name="lx_pad_no_service">El puntero no puede hacer clic hasta que actives Dex-X en Accesibilidad.</string>
     <string name="lx_pad_failed">No se pudo abrir el panel táctil.</string>
 
     <string name="tp_channel">Panel táctil</string>
@@ -305,7 +305,7 @@
 
     <!-- Phone: who owns the Home button -->
     <string name="lx_home_title">¿Que Inicio vuelva aquí?</string>
-    <string name="lx_home_body">Inicio y el gesto de deslizar hacia arriba van al launcher del teléfono, así que salir de una app sale del escritorio. Haz que Open Android DeX sea la app de inicio y volverán aquí. Atrás ya lo hace.</string>
+    <string name="lx_home_body">Inicio y el gesto de deslizar hacia arriba van al launcher del teléfono, así que salir de una app sale del escritorio. Haz que Dex-X sea la app de inicio y volverán aquí. Atrás ya lo hace.</string>
     <string name="lx_home_set">Definir como inicio</string>
     <string name="lx_home_not_now">Ahora no</string>
     <string name="lx_home_no_chooser">Este teléfono no tiene una pantalla de app de inicio que abrir.</string>

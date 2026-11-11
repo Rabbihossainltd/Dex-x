@@ -23,7 +23,7 @@
         <item quantity="one">%d 个应用</item>
         <item quantity="other">%d 个应用</item>
     </plurals>
-    <string name="caption_service_description">在桌面应用窗口上绘制标题栏。Open Android DeX 需要它把标题栏放进每个窗口内部；它不会读取或传输窗口内容。</string>
+    <string name="caption_service_description">在桌面应用窗口上绘制标题栏。Dex-X 需要它把标题栏放进每个窗口内部；它不会读取或传输窗口内容。</string>
 
     <string name="st_title">DeX 设置</string>
     <string name="st_search">搜索设置</string>
@@ -139,7 +139,7 @@
     <string name="st_icons_medium">中</string>
     <string name="st_icons_large">大</string>
     <string name="st_home_app">主屏幕应用</string>
-    <string name="st_home_app_yes">Open Android DeX</string>
+    <string name="st_home_app_yes">Dex-X</string>
     <string name="st_home_app_yes_sub">主页键和上滑手势会回到桌面。</string>
     <string name="st_home_app_no">手机自带的启动器</string>
     <string name="st_home_app_no_sub">主页键和上滑手势会离开桌面。点按可更改。</string>
@@ -250,7 +250,7 @@
     <string name="st_scope_cursor">鼠标与光标</string>
     <string name="st_scope_display">显示尺寸与语言</string>
     <string name="st_resources">开发资源</string>
-    <string name="st_res_repo">GitHub 上的 Open Android DeX</string>
+    <string name="st_res_repo">GitHub 上的 Dex-X</string>
     <string name="st_res_repo_sub">桌面应用、启动器与窗口守护进程</string>
     <string name="st_res_daemon">窗口守护进程源码</string>
     <string name="st_res_daemon_sub">标题栏背后的 shell-uid 服务</string>
@@ -284,7 +284,7 @@
     <string name="lx_pad_reverse">反向</string>
     <string name="lx_pad_foot">插在手机上的鼠标或键盘始终照常工作。</string>
     <string name="lx_pad_no_overlay">触控板需要“显示在其他应用上层”的权限。</string>
-    <string name="lx_pad_no_service">在无障碍中启用 Open Android DeX 之前，指针无法点击。</string>
+    <string name="lx_pad_no_service">在无障碍中启用 Dex-X 之前，指针无法点击。</string>
     <string name="lx_pad_failed">无法打开触控板。</string>
 
     <string name="tp_channel">触控板</string>
@@ -305,7 +305,7 @@
 
     <!-- Phone: who owns the Home button -->
     <string name="lx_home_title">让主页键回到这里？</string>
-    <string name="lx_home_body">主页键和上滑手势会回到手机自带的启动器，所以离开应用就等于离开桌面。把 Open Android DeX 设为主屏幕应用，两者就会回到这里。返回键本来就会。</string>
+    <string name="lx_home_body">主页键和上滑手势会回到手机自带的启动器，所以离开应用就等于离开桌面。把 Dex-X 设为主屏幕应用，两者就会回到这里。返回键本来就会。</string>
     <string name="lx_home_set">设为主屏幕</string>
     <string name="lx_home_not_now">暂不</string>
     <string name="lx_home_no_chooser">这台手机没有可以打开的主屏幕应用设置。</string>

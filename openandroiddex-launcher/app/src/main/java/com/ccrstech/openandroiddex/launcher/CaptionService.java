@@ -240,6 +240,10 @@ public final class CaptionService extends AccessibilityService {
         for (WmClient.Task t : s.tasks.values()) {
             if (t.pkg != null && !t.pkg.isEmpty()) out.add(t.pkg);
         }
+        // …and every task the display still has, visible or not: see openTasks.
+        for (String pkg : s.openTasks.values()) {
+            if (pkg != null && !pkg.isEmpty()) out.add(pkg);
+        }
         // …and it is built from VISIBLE tasks (see applyTasks), so a window we
         // minimised is not in it. That is the whole reason an app could leave
         // the taskbar the moment it was minimised: `minimised` is the only
@@ -1089,6 +1093,13 @@ public final class CaptionService extends AccessibilityService {
                 || activity.endsWith("." + simple);
     }
 
+    /** The task ids in one list the daemon returned. */
+    private static java.util.Set<Integer> liveTaskIds(List<WmClient.Task> live) {
+        java.util.Set<Integer> ids = new HashSet<>(live.size());
+        for (WmClient.Task t : live) ids.add(t.taskId);
+        return ids;
+    }
+
     /** Our launcher's own task on the desktop display, if it is still there. */
     private boolean desktopHomeAlive(List<WmClient.Task> live) {
         if (live == null) return true;                 // no answer is not "gone"
@@ -1219,6 +1230,18 @@ public final class CaptionService extends AccessibilityService {
     }
 
     /** Task id → when it was last asked to leave its freeform window (see pinHome). */
+    /**
+     * Every task the display still has, visible or not — just the package names.
+     *
+     * <p>The taskbar's open-apps row was fed from {@code tasks}, which `applyTasks` builds
+     * from VISIBLE tasks only. A window that is merely covered — by the desktop after a
+     * click on the background, by another window on top of it — is still open, still
+     * running, and still in the display's root list; but it vanished from the row, and the
+     * user reads that as the window having been minimised or closed when neither happened.
+     * This is the list that answers "is it still open" without asking about visibility.
+     */
+    private final Map<Integer, String> openTasks = new HashMap<>();
+
     private final Map<Integer, Long> homesUnfloated = new HashMap<>();
     /** Task id → how many times it has been asked (see pinHome's escalation). */
     private final Map<Integer, Integer> homeUnfloatTries = new HashMap<>();
@@ -1425,6 +1448,14 @@ public final class CaptionService extends AccessibilityService {
         for (int i = live.size() - 1; i >= 0; i--) {
             baseId = live.get(i).taskId;      // last in the daemon's topmost-first order
             break;
+        }
+        // Recorded from `live`, BEFORE the visibility filter below: a covered window is
+        // open. Pruned to what this pass actually listed, so a closed one still falls out.
+        openTasks.keySet().retainAll(liveTaskIds(live));
+        for (WmClient.Task t : live) {
+            if (!t.isFreeform()) continue;
+            if (isDesktopTask(t)) continue;
+            if (t.pkg != null && !t.pkg.isEmpty()) openTasks.put(t.taskId, t.pkg);
         }
         for (WmClient.Task t : live) {
             if (!t.isFreeform() || !t.visible) continue;

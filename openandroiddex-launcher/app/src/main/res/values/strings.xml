@@ -24,7 +24,7 @@
         <item quantity="one">%d app</item>
         <item quantity="other">%d apps</item>
     </plurals>
-    <string name="caption_service_description">Draws the title bar on desktop app windows. Open Android DeX needs this to place a caption inside each window; it does not read or transmit window content.</string>
+    <string name="caption_service_description">Draws the title bar on desktop app windows. Dex-X needs this to place a caption inside each window; it does not read or transmit window content.</string>
 
     <!-- ── Settings window ── -->
     <string name="st_title">DeX Settings</string>
@@ -167,7 +167,7 @@
     <string name="st_icons_medium">Medium</string>
     <string name="st_icons_large">Large</string>
     <string name="st_home_app">Home app</string>
-    <string name="st_home_app_yes">Open Android DeX</string>
+    <string name="st_home_app_yes">Dex-X</string>
     <string name="st_home_app_yes_sub">Home and the swipe-up gesture come back to the desktop.</string>
     <string name="st_home_app_no">The phone\'s launcher</string>
     <string name="st_home_app_no_sub">Home and the swipe-up gesture leave the desktop. Tap to change it.</string>
@@ -223,7 +223,7 @@
     <string name="st_notif_access">Notification access</string>
     <string name="st_notif_access_on">Granted — the desktop can see the phone’s notifications</string>
     <string name="st_notif_access_off">Not granted — tap to open the phone’s screen for it</string>
-    <string name="st_notif_note">Buttons on the desktop press the posting app’s own buttons. Open Android DeX holds no permission to place, answer or end a call by itself.</string>
+    <string name="st_notif_note">Buttons on the desktop press the posting app’s own buttons. Dex-X holds no permission to place, answer or end a call by itself.</string>
     <string name="st_notif_media_note">Notification access is also what lets the quick-settings panel show what is playing. Without it the panel still has volume, but no track controls.</string>
     <string name="st_cursor_render">Pointer rendering</string>
     <string name="st_cursor_render_pc">Computer pointer</string>
@@ -413,7 +413,7 @@
     <string name="st_scope_stream">Stream and clipboard settings</string>
     <string name="st_scope_display">Display size and language</string>
     <string name="st_resources">Development resources</string>
-    <string name="st_res_repo">Open Android DeX on GitHub</string>
+    <string name="st_res_repo">Dex-X on GitHub</string>
     <string name="st_res_repo_sub">Desktop app, launcher and window daemon</string>
     <string name="st_res_daemon">Window daemon source</string>
     <string name="st_res_daemon_sub">The shell-uid service behind window chrome</string>
@@ -448,7 +448,7 @@
     <string name="lx_pad_reverse">Reverse</string>
     <string name="lx_pad_foot">A mouse or keyboard plugged into the phone always works as it normally does.</string>
     <string name="lx_pad_no_overlay">The touchpad needs permission to draw over other apps.</string>
-    <string name="lx_pad_no_service">The pointer cannot click until Open Android DeX is turned on in Accessibility.</string>
+    <string name="lx_pad_no_service">The pointer cannot click until Dex-X is turned on in Accessibility.</string>
     <string name="lx_pad_failed">The touchpad could not be opened.</string>
 
     <!-- The phone's screen as the desktop's touchpad, while a computer shows the desktop -->
@@ -466,7 +466,7 @@
 
     <!-- Phone: who owns the Home button -->
     <string name="lx_home_title">Bring Home back here?</string>
-    <string name="lx_home_body">Home and the swipe-up gesture go to the phone\'s own launcher, so leaving an app leaves the desktop. Make Open Android DeX the home app and they come back here instead. Back already does.</string>
+    <string name="lx_home_body">Home and the swipe-up gesture go to the phone\'s own launcher, so leaving an app leaves the desktop. Make Dex-X the home app and they come back here instead. Back already does.</string>
     <string name="lx_home_set">Set as home</string>
     <string name="lx_home_not_now">Not now</string>
     <string name="lx_home_no_chooser">This phone has no home-app screen to open.</string>
@@ -518,7 +518,7 @@
     <string name="lx_notif_dismiss">Dismiss</string>
     <string name="lx_notif_now">now</string>
     <string name="lx_notif_gone">That notification is no longer there</string>
-    <string name="lx_notif_grant_body">The phone has not let this desktop see its notifications yet. Turn on notification access for Open Android DeX and calls, messages and alerts will show up here — with the same buttons the phone gives them.</string>
+    <string name="lx_notif_grant_body">The phone has not let this desktop see its notifications yet. Turn on notification access for Dex-X and calls, messages and alerts will show up here — with the same buttons the phone gives them.</string>
     <string name="lx_notif_grant_open">Turn on notification access</string>
     <string name="lx_notif_grant_failed">This phone has no notification-access screen to open</string>
     <string name="lx_call_incoming">Incoming call</string>

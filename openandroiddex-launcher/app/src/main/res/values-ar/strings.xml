@@ -23,7 +23,7 @@
         <item quantity="one">تطبيق واحد %d</item>
         <item quantity="other">%d تطبيقات</item>
     </plurals>
-    <string name="caption_service_description">يرسم شريط العنوان على نوافذ سطح المكتب. يحتاج Open Android DeX إلى ذلك لوضع شريط داخل كل نافذة؛ وهو لا يقرأ محتوى النوافذ ولا ينقله.</string>
+    <string name="caption_service_description">يرسم شريط العنوان على نوافذ سطح المكتب. يحتاج Dex-X إلى ذلك لوضع شريط داخل كل نافذة؛ وهو لا يقرأ محتوى النوافذ ولا ينقله.</string>
 
     <string name="st_title">إعدادات DeX</string>
     <string name="st_search">البحث في الإعدادات</string>
@@ -139,7 +139,7 @@
     <string name="st_icons_medium">متوسطة</string>
     <string name="st_icons_large">كبيرة</string>
     <string name="st_home_app">تطبيق الشاشة الرئيسية</string>
-    <string name="st_home_app_yes">Open Android DeX</string>
+    <string name="st_home_app_yes">Dex-X</string>
     <string name="st_home_app_yes_sub">زر الشاشة الرئيسية وإيماءة السحب لأعلى يعودان إلى سطح المكتب.</string>
     <string name="st_home_app_no">مشغّل الهاتف</string>
     <string name="st_home_app_no_sub">زر الشاشة الرئيسية وإيماءة السحب لأعلى يغادران سطح المكتب. اضغط للتغيير.</string>
@@ -250,7 +250,7 @@
     <string name="st_scope_cursor">الفأرة والمؤشر</string>
     <string name="st_scope_display">حجم العرض واللغة</string>
     <string name="st_resources">موارد التطوير</string>
-    <string name="st_res_repo">Open Android DeX على GitHub</string>
+    <string name="st_res_repo">Dex-X على GitHub</string>
     <string name="st_res_repo_sub">تطبيق سطح المكتب والمشغّل وخادم النوافذ</string>
     <string name="st_res_daemon">مصدر خادم النوافذ</string>
     <string name="st_res_daemon_sub">خدمة shell-uid التي تقف خلف أشرطة العناوين</string>
@@ -284,7 +284,7 @@
     <string name="lx_pad_reverse">عكسي</string>
     <string name="lx_pad_foot">الماوس أو لوحة المفاتيح الموصولة بالهاتف تعمل كالمعتاد دائمًا.</string>
     <string name="lx_pad_no_overlay">تحتاج لوحة اللمس إذنًا بالعرض فوق التطبيقات الأخرى.</string>
-    <string name="lx_pad_no_service">لا يمكن للمؤشر النقر حتى تُفعّل Open Android DeX في إمكانية الوصول.</string>
+    <string name="lx_pad_no_service">لا يمكن للمؤشر النقر حتى تُفعّل Dex-X في إمكانية الوصول.</string>
     <string name="lx_pad_failed">تعذّر فتح لوحة اللمس.</string>
 
     <string name="tp_channel">لوحة اللمس</string>
@@ -305,7 +305,7 @@
 
     <!-- Phone: who owns the Home button -->
     <string name="lx_home_title">إعادة زر الشاشة الرئيسية إلى هنا؟</string>
-    <string name="lx_home_body">زر الشاشة الرئيسية وإيماءة السحب لأعلى يذهبان إلى مشغّل الهاتف، فمغادرة التطبيق تعني مغادرة سطح المكتب. اجعل Open Android DeX تطبيق الشاشة الرئيسية ليعودا إلى هنا. زر الرجوع يفعل ذلك أصلًا.</string>
+    <string name="lx_home_body">زر الشاشة الرئيسية وإيماءة السحب لأعلى يذهبان إلى مشغّل الهاتف، فمغادرة التطبيق تعني مغادرة سطح المكتب. اجعل Dex-X تطبيق الشاشة الرئيسية ليعودا إلى هنا. زر الرجوع يفعل ذلك أصلًا.</string>
     <string name="lx_home_set">تعيينه كشاشة رئيسية</string>
     <string name="lx_home_not_now">ليس الآن</string>
     <string name="lx_home_no_chooser">لا توجد في هذا الهاتف شاشة لاختيار تطبيق الشاشة الرئيسية.</string>

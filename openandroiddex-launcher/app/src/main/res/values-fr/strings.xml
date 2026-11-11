@@ -23,7 +23,7 @@
         <item quantity="one">%d application</item>
         <item quantity="other">%d applications</item>
     </plurals>
-    <string name="caption_service_description">Dessine la barre de titre des fenêtres du bureau. Open Android DeX en a besoin pour placer une barre à l\'intérieur de chaque fenêtre ; il ne lit ni ne transmet le contenu des fenêtres.</string>
+    <string name="caption_service_description">Dessine la barre de titre des fenêtres du bureau. Dex-X en a besoin pour placer une barre à l\'intérieur de chaque fenêtre ; il ne lit ni ne transmet le contenu des fenêtres.</string>
 
     <string name="st_title">Paramètres DeX</string>
     <string name="st_search">Rechercher un paramètre</string>
@@ -139,7 +139,7 @@
     <string name="st_icons_medium">Moyennes</string>
     <string name="st_icons_large">Grandes</string>
     <string name="st_home_app">Application d’accueil</string>
-    <string name="st_home_app_yes">Open Android DeX</string>
+    <string name="st_home_app_yes">Dex-X</string>
     <string name="st_home_app_yes_sub">Accueil et le balayage vers le haut reviennent au bureau.</string>
     <string name="st_home_app_no">Le lanceur du téléphone</string>
     <string name="st_home_app_no_sub">Accueil et le balayage vers le haut quittent le bureau. Touchez pour changer.</string>
@@ -250,7 +250,7 @@
     <string name="st_scope_cursor">Souris et curseur</string>
     <string name="st_scope_display">Taille d\'affichage et langue</string>
     <string name="st_resources">Ressources de développement</string>
-    <string name="st_res_repo">Open Android DeX sur GitHub</string>
+    <string name="st_res_repo">Dex-X sur GitHub</string>
     <string name="st_res_repo_sub">Appli de bureau, launcher et daemon de fenêtres</string>
     <string name="st_res_daemon">Sources du daemon de fenêtres</string>
     <string name="st_res_daemon_sub">Le service shell-uid derrière les barres de titre</string>
@@ -284,7 +284,7 @@
     <string name="lx_pad_reverse">Inversé</string>
     <string name="lx_pad_foot">Une souris ou un clavier branché au téléphone fonctionne toujours normalement.</string>
     <string name="lx_pad_no_overlay">Le pavé tactile a besoin de l’autorisation de s’afficher par-dessus les autres applications.</string>
-    <string name="lx_pad_no_service">Le pointeur ne peut pas cliquer tant qu’Open Android DeX n’est pas activé dans l’Accessibilité.</string>
+    <string name="lx_pad_no_service">Le pointeur ne peut pas cliquer tant qu’Dex-X n’est pas activé dans l’Accessibilité.</string>
     <string name="lx_pad_failed">Impossible d’ouvrir le pavé tactile.</string>
 
     <string name="tp_channel">Pavé tactile</string>
@@ -305,7 +305,7 @@
 
     <!-- Phone: who owns the Home button -->
     <string name="lx_home_title">Ramener Accueil ici ?</string>
-    <string name="lx_home_body">Accueil et le balayage vers le haut mènent au lanceur du téléphone : quitter une application quitte donc le bureau. Faites d’Open Android DeX l’application d’accueil et ils reviendront ici. Retour le fait déjà.</string>
+    <string name="lx_home_body">Accueil et le balayage vers le haut mènent au lanceur du téléphone : quitter une application quitte donc le bureau. Faites d’Dex-X l’application d’accueil et ils reviendront ici. Retour le fait déjà.</string>
     <string name="lx_home_set">Définir comme accueil</string>
     <string name="lx_home_not_now">Pas maintenant</string>
     <string name="lx_home_no_chooser">Ce téléphone n’a pas d’écran de choix de l’application d’accueil.</string>

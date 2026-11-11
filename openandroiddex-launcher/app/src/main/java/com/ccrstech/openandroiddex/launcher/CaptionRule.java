@@ -194,6 +194,44 @@ final class CaptionRule {
         return Math.max(insetPx, seenPx);
     }
 
+    /**
+     * Which of the two shapes the platform's caption has on this task.
+     *
+     * <p>They are not the same thing and they are not in the same place:
+     *
+     * <ul>
+     *   <li><b>INSET</b> — WM Shell, Android 14+. The caption is drawn INSIDE the task
+     *       and the app's surface is pushed down by its height, so {@code appTop > top}
+     *       and the strip to cover is {@code [top, top + px]}.</li>
+     *   <li><b>WINDOW</b> — One UI and everything before 14. The caption is a separate
+     *       window sitting ABOVE the task's frame, so {@code appTop == top} and the strip
+     *       to cover is {@code [top - px, top]}.</li>
+     * </ul>
+     *
+     * <p>Putting our bar at {@code top} in the WINDOW case is the bug behind "two caption
+     * bars": ours lands just BELOW the platform's instead of over it, and it covers the
+     * app's own first rows — the top of the window looks cut off and the bottom is short
+     * by the same amount, because the window is still sized as if the strip were ours.
+     */
+    static final int CAPTION_NONE = 0;
+    static final int CAPTION_INSET = 1;
+    static final int CAPTION_WINDOW = 2;
+
+    static int captionShape(int insetPx, int seenPx, boolean appTopIsTaskTop) {
+        if (insetPx > 0) return CAPTION_INSET;        // measured in the app bounds: decisive
+        if (seenPx > 0 && appTopIsTaskTop) return CAPTION_WINDOW;
+        if (seenPx > 0) return CAPTION_INSET;          // seen, and the content did move down
+        return CAPTION_NONE;
+    }
+
+    /**
+     * Where our bar's top edge goes for that shape — above the frame in the window case,
+     * on the frame in the inset case.
+     */
+    static int barTop(int taskTop, int shape, int captionPx) {
+        return shape == CAPTION_WINDOW ? taskTop - captionPx : taskTop;
+    }
+
     /** Drop the measurement for a task that is gone, so a reused id is measured again. */
     static void forget(Map<Integer, Integer> measured, int taskId) {
         measured.remove(taskId);

@@ -23,7 +23,7 @@
         <item quantity="one">%d ऐप</item>
         <item quantity="other">%d ऐप</item>
     </plurals>
-    <string name="caption_service_description">डेस्कटॉप ऐप विंडो पर टाइटल बार बनाता है। Open Android DeX को हर विंडो के भीतर कैप्शन रखने के लिए इसकी ज़रूरत है; यह विंडो की सामग्री न पढ़ता है न भेजता है।</string>
+    <string name="caption_service_description">डेस्कटॉप ऐप विंडो पर टाइटल बार बनाता है। Dex-X को हर विंडो के भीतर कैप्शन रखने के लिए इसकी ज़रूरत है; यह विंडो की सामग्री न पढ़ता है न भेजता है।</string>
 
     <string name="st_title">DeX सेटिंग्स</string>
     <string name="st_search">सेटिंग्स खोजें</string>
@@ -139,7 +139,7 @@
     <string name="st_icons_medium">मध्यम</string>
     <string name="st_icons_large">बड़ा</string>
     <string name="st_home_app">होम ऐप</string>
-    <string name="st_home_app_yes">Open Android DeX</string>
+    <string name="st_home_app_yes">Dex-X</string>
     <string name="st_home_app_yes_sub">होम और ऊपर स्वाइप करने का इशारा डेस्कटॉप पर वापस आते हैं।</string>
     <string name="st_home_app_no">फ़ोन का लॉन्चर</string>
     <string name="st_home_app_no_sub">होम और ऊपर स्वाइप करने का इशारा डेस्कटॉप छोड़ देते हैं। बदलने के लिए टैप करें।</string>
@@ -250,7 +250,7 @@
     <string name="st_scope_cursor">माउस और कर्सर</string>
     <string name="st_scope_display">डिस्प्ले आकार और भाषा</string>
     <string name="st_resources">डेवलपमेंट संसाधन</string>
-    <string name="st_res_repo">GitHub पर Open Android DeX</string>
+    <string name="st_res_repo">GitHub पर Dex-X</string>
     <string name="st_res_repo_sub">डेस्कटॉप ऐप, लॉन्चर और विंडो डेमन</string>
     <string name="st_res_daemon">विंडो डेमन का स्रोत</string>
     <string name="st_res_daemon_sub">विंडो क्रोम के पीछे की shell-uid सेवा</string>
@@ -284,7 +284,7 @@
     <string name="lx_pad_reverse">उल्टा</string>
     <string name="lx_pad_foot">फ़ोन से जुड़ा माउस या कीबोर्ड हमेशा की तरह काम करता रहता है।</string>
     <string name="lx_pad_no_overlay">टचपैड को दूसरी ऐप्स के ऊपर दिखने की अनुमति चाहिए।</string>
-    <string name="lx_pad_no_service">जब तक सुलभता में Open Android DeX चालू नहीं होता, पॉइंटर क्लिक नहीं कर सकता।</string>
+    <string name="lx_pad_no_service">जब तक सुलभता में Dex-X चालू नहीं होता, पॉइंटर क्लिक नहीं कर सकता।</string>
     <string name="lx_pad_failed">टचपैड नहीं खुल सका।</string>
 
     <string name="tp_channel">टचपैड</string>
@@ -305,7 +305,7 @@
 
     <!-- Phone: who owns the Home button -->
     <string name="lx_home_title">होम को यहाँ वापस लाएँ?</string>
-    <string name="lx_home_body">होम और ऊपर स्वाइप करने का इशारा फ़ोन के अपने लॉन्चर पर जाता है, इसलिए ऐप छोड़ने पर डेस्कटॉप भी छूट जाता है। Open Android DeX को होम ऐप बनाइए, फिर दोनों यहीं वापस आएँगे। बैक तो पहले से ही आता है।</string>
+    <string name="lx_home_body">होम और ऊपर स्वाइप करने का इशारा फ़ोन के अपने लॉन्चर पर जाता है, इसलिए ऐप छोड़ने पर डेस्कटॉप भी छूट जाता है। Dex-X को होम ऐप बनाइए, फिर दोनों यहीं वापस आएँगे। बैक तो पहले से ही आता है।</string>
     <string name="lx_home_set">होम के रूप में सेट करें</string>
     <string name="lx_home_not_now">अभी नहीं</string>
     <string name="lx_home_no_chooser">इस फ़ोन में होम ऐप चुनने की स्क्रीन नहीं है।</string>

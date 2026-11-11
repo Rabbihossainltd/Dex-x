@@ -23,7 +23,7 @@
         <item quantity="one">%d એપ</item>
         <item quantity="other">%d એપ્સ</item>
     </plurals>
-    <string name="caption_service_description">ડેસ્કટોપ એપ વિન્ડો પર ટાઇટલ બાર દોરે છે. Open Android DeX ને દરેક વિન્ડોમાં કૅપ્શન મૂકવા માટે આની જરૂર છે; તે વિન્ડોની સામગ્રી વાંચતું કે મોકલતું નથી.</string>
+    <string name="caption_service_description">ડેસ્કટોપ એપ વિન્ડો પર ટાઇટલ બાર દોરે છે. Dex-X ને દરેક વિન્ડોમાં કૅપ્શન મૂકવા માટે આની જરૂર છે; તે વિન્ડોની સામગ્રી વાંચતું કે મોકલતું નથી.</string>
 
     <string name="st_title">DeX સેટિંગ્સ</string>
     <string name="st_search">સેટિંગ્સ શોધો</string>
@@ -139,7 +139,7 @@
     <string name="st_icons_medium">મધ્યમ</string>
     <string name="st_icons_large">મોટું</string>
     <string name="st_home_app">હોમ ઍપ</string>
-    <string name="st_home_app_yes">Open Android DeX</string>
+    <string name="st_home_app_yes">Dex-X</string>
     <string name="st_home_app_yes_sub">હોમ અને ઉપર સ્વાઇપ કરવાનો ઇશારો ડેસ્કટૉપ પર પાછા આવે છે.</string>
     <string name="st_home_app_no">ફોનનું લૉન્ચર</string>
     <string name="st_home_app_no_sub">હોમ અને ઉપર સ્વાઇપ કરવાનો ઇશારો ડેસ્કટૉપ છોડી દે છે. બદલવા ટૅપ કરો.</string>
@@ -250,7 +250,7 @@
     <string name="st_scope_cursor">માઉસ અને કર્સર</string>
     <string name="st_scope_display">ડિસ્પ્લે માપ અને ભાષા</string>
     <string name="st_resources">ડેવલપમેન્ટ સંસાધનો</string>
-    <string name="st_res_repo">GitHub પર Open Android DeX</string>
+    <string name="st_res_repo">GitHub પર Dex-X</string>
     <string name="st_res_repo_sub">ડેસ્કટોપ એપ, લોન્ચર અને વિન્ડો ડિમન</string>
     <string name="st_res_daemon">વિન્ડો ડિમનનો સ્રોત</string>
     <string name="st_res_daemon_sub">વિન્ડો ક્રોમ પાછળની shell-uid સેવા</string>
@@ -284,7 +284,7 @@
     <string name="lx_pad_reverse">ઊલટું</string>
     <string name="lx_pad_foot">ફોન સાથે જોડેલું માઉસ કે કીબોર્ડ હંમેશની જેમ કામ કરતું રહે છે.</string>
     <string name="lx_pad_no_overlay">ટચપૅડને બીજી ઍપ ઉપર દોરવાની પરવાનગી જોઈએ છે.</string>
-    <string name="lx_pad_no_service">ઍક્સેસિબિલિટીમાં Open Android DeX ચાલુ ન થાય ત્યાં સુધી પોઇન્ટર ક્લિક કરી શકતું નથી.</string>
+    <string name="lx_pad_no_service">ઍક્સેસિબિલિટીમાં Dex-X ચાલુ ન થાય ત્યાં સુધી પોઇન્ટર ક્લિક કરી શકતું નથી.</string>
     <string name="lx_pad_failed">ટચપૅડ ખૂલી શક્યું નહીં.</string>
 
     <string name="tp_channel">ટચપૅડ</string>
@@ -305,7 +305,7 @@
 
     <!-- Phone: who owns the Home button -->
     <string name="lx_home_title">હોમ અહીં પાછું લાવવું?</string>
-    <string name="lx_home_body">હોમ અને ઉપર સ્વાઇપ કરવાનો ઇશારો ફોનના પોતાના લૉન્ચરમાં જાય છે, એટલે ઍપ છોડતાં ડેસ્કટૉપ પણ છૂટી જાય છે. Open Android DeX ને હોમ ઍપ બનાવો એટલે એ બંને અહીં પાછાં આવશે. બૅક તો પહેલેથી જ આવે છે.</string>
+    <string name="lx_home_body">હોમ અને ઉપર સ્વાઇપ કરવાનો ઇશારો ફોનના પોતાના લૉન્ચરમાં જાય છે, એટલે ઍપ છોડતાં ડેસ્કટૉપ પણ છૂટી જાય છે. Dex-X ને હોમ ઍપ બનાવો એટલે એ બંને અહીં પાછાં આવશે. બૅક તો પહેલેથી જ આવે છે.</string>
     <string name="lx_home_set">હોમ તરીકે સેટ કરો</string>
     <string name="lx_home_not_now">હમણાં નહીં</string>
     <string name="lx_home_no_chooser">આ ફોનમાં હોમ ઍપ પસંદ કરવાની સ્ક્રીન નથી.</string>

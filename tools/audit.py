@@ -393,7 +393,7 @@ check("caption: an override left by an older build is released once per session"
 # task's app bounds: it makes a strip where nothing is reserved and NEVER releases
 # one, because the release bookkeeping is the service's.
 check("caption: the fallback covers the platform's caption and never fights for the strip",
-      "CaptionRule.captionPx(t.platformCaption(), seenCaption(t, service))" in launcher("CaptionFallback.java")
+      "CaptionRule.captionPx(insetPx, seenPx)" in launcher("CaptionFallback.java")
       and "final int barPx = platformPx > 0 ? platformPx : px;" in launcher("CaptionFallback.java")
       and "wm.unstrip(" not in launcher("CaptionFallback.java"),
       "CaptionFallback.pass")
@@ -482,7 +482,7 @@ check("caption: a remembered height expires when the caption has gone",
 check("caption: both renderers ask one function for the caption height",
       "static int captionPx(int insetPx, int seenPx)" in rule
       and "CaptionRule.captionPx(t.platformCaption(), hostCaptionPx)" in caption_service
-      and "CaptionRule.captionPx(t.platformCaption(), seenCaption(t, service))" in fallback,
+      and "CaptionRule.captionPx(insetPx, seenPx)" in fallback,
       "CaptionRule.captionPx")
 
 check("caption: the occlusion test sees every visible window, not just the kept ones",
@@ -558,6 +558,20 @@ check("threads: the probe sweep is guarded once, against the list it sweeps",
       "ProbeCache.sweep(probed, idsOf(tasks));" in fallback
       and "ProbeCache.shouldSweep(probed.size(), showing.size())" not in fallback,
       "two guards disagreeing is a guard that stops guarding")
+
+check("caption: the bar is placed by the SHAPE of the platform's caption",
+      "CaptionRule.captionShape(" in fallback and "CaptionRule.barTop(" in fallback
+      and "static int barTop(int taskTop, int shape, int captionPx)" in read(LAUNCHER / "CaptionRule.java"),
+      "drawing at the task's top under a caption WINDOW is the two-bar bug")
+
+check("taskbar: a merely covered window keeps its tile",
+      "openTasks.keySet().retainAll(liveTaskIds(live));" in caption_service
+      and "for (String pkg : s.openTasks.values())" in caption_service,
+      "a window covered by the desktop is open, not closed")
+
+check("caption: the close button turns red and the buttons respond to hover",
+      "0xFFC42B1C" in fallback and "ACTION_HOVER_ENTER" in fallback,
+      "Windows' caption buttons change under the pointer")
 
 check("taskbar: a window the fallback minimised keeps its tile",
       "next.addAll(CaptionFallback.hiddenPackages());" in launcher("LauncherActivity.java")

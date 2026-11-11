@@ -128,6 +128,59 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.26 — the six reports from the phone, and what each one actually was
+
+### 4. Two caption bars on some apps, top cut and bottom blank (fixed)
+
+This one had a real cause, and it was mine. The bar is placed at the task's top with the
+platform caption's height — which is right when the caption is an **inset**: WM Shell on
+Android 14+ draws it inside the task and pushes the app's surface down, so the strip to
+cover is `[top, top+px]`.
+
+One UI and everything before 14 draw the caption as a **separate window above the task's
+frame**. There, `top` is still the app's own first row, so our bar landed just *below* the
+platform's caption — two bars, exactly as reported — and covered the app's first 40-odd
+pixels while the window's bottom stayed short by the same amount. That is Free Fire's "top
+cut, bottom blank" and TikTok's "old bar and new bar" in one sentence.
+
+`CaptionRule.captionShape()` now names the two shapes and `barTop()` puts the bar above the
+frame for a caption window, on the frame for an inset. Six cases in the rule suite.
+
+### 2. Clicking beside a window made it vanish from the taskbar (fixed)
+
+A window covered by the desktop is still open — it is in the display's root list — but the
+open-apps row was built from *visible* tasks, so the tile disappeared and the window looked
+minimised or closed when neither had happened. `CaptionService.openTasks` records every task
+the display still has, and the row is fed from that as well as from the visible ones.
+
+### 5. No animation, and the close button never turned red (fixed)
+
+Windows' caption buttons are plain grey glyphs that lift under the pointer, and the close
+button alone turns `#C42B1C` with a white glyph. Added: hover tint, glyph colour, a slight
+press scale, and a 140 ms fade-and-drop when a bar appears over a window that is still
+animating in.
+
+### 6. The old name (partly done)
+
+Every user-visible string in all nine locales that still said "Open Android DeX" now says
+Dex-X. What I have **not** done, deliberately: renaming the source directories
+(`openandroiddex-*`) and the Android application id `com.ccrstech.openandroiddex.launcher`.
+Those are one atomic change — the id is what the phone and the computer use to find each
+other — and a half-rename breaks the handshake in a way I cannot test here. It is the next
+thing on the list. The GPL notice in `LICENSE`/`NOTICE.md` stays regardless: removing it is
+not a rename, it is a licence violation.
+
+### 1 and 3 — not fixed, and I will not pretend otherwise
+
+**The home still showing a caption bar** and **the navigation bar still appearing** have no
+cause I can prove from the source. The code already does the three things that should prevent
+the first (never start the home in a window, unfloat it if it is, skip it in both renderers)
+and passes `--no-vd-system-decorations` for the second — which is exactly why guessing again
+would be another wrong fix. One screenshot of each is worth more than another release of
+guesses, and the log line to look for is in `doc/`.
+
+Suites: audit **88/88**, rule **32/32 + 6**, probe cache **11/11**, dump **9/9**, protocol **6/6**.
+
 ## v0.7.25 — checking 0.7.24 found a crash in it
 
 Asked to check everything again. Reading the code I wrote one release earlier — rather than

@@ -23,7 +23,7 @@
         <item quantity="one">%d aplicação</item>
         <item quantity="other">%d aplicações</item>
     </plurals>
-    <string name="caption_service_description">Desenha a barra de título nas janelas do desktop. O Open Android DeX precisa disto para colocar uma legenda dentro de cada janela; ele não lê nem transmite o conteúdo das janelas.</string>
+    <string name="caption_service_description">Desenha a barra de título nas janelas do desktop. O Dex-X precisa disto para colocar uma legenda dentro de cada janela; ele não lê nem transmite o conteúdo das janelas.</string>
 
     <string name="st_title">Configurações DeX</string>
     <string name="st_search">Buscar configurações</string>
@@ -139,7 +139,7 @@
     <string name="st_icons_medium">Médio</string>
     <string name="st_icons_large">Grande</string>
     <string name="st_home_app">App de início</string>
-    <string name="st_home_app_yes">Open Android DeX</string>
+    <string name="st_home_app_yes">Dex-X</string>
     <string name="st_home_app_yes_sub">O Início e o gesto de deslizar para cima voltam para a área de trabalho.</string>
     <string name="st_home_app_no">O launcher do telefone</string>
     <string name="st_home_app_no_sub">O Início e o gesto de deslizar para cima saem da área de trabalho. Toque para mudar.</string>
@@ -250,7 +250,7 @@
     <string name="st_scope_cursor">Rato e cursor</string>
     <string name="st_scope_display">Tamanho da tela e idioma</string>
     <string name="st_resources">Recursos de desenvolvimento</string>
-    <string name="st_res_repo">Open Android DeX no GitHub</string>
+    <string name="st_res_repo">Dex-X no GitHub</string>
     <string name="st_res_repo_sub">App de desktop, launcher e daemon de janelas</string>
     <string name="st_res_daemon">Código do daemon de janelas</string>
     <string name="st_res_daemon_sub">O serviço shell-uid por trás das barras de título</string>
@@ -284,7 +284,7 @@
     <string name="lx_pad_reverse">Invertida</string>
     <string name="lx_pad_foot">Um mouse ou teclado ligado ao telefone continua funcionando normalmente.</string>
     <string name="lx_pad_no_overlay">O touchpad precisa de permissão para aparecer sobre outros apps.</string>
-    <string name="lx_pad_no_service">O ponteiro não consegue clicar até que o Open Android DeX seja ativado na Acessibilidade.</string>
+    <string name="lx_pad_no_service">O ponteiro não consegue clicar até que o Dex-X seja ativado na Acessibilidade.</string>
     <string name="lx_pad_failed">Não foi possível abrir o touchpad.</string>
 
     <string name="tp_channel">Touchpad</string>
@@ -305,7 +305,7 @@
 
     <!-- Phone: who owns the Home button -->
     <string name="lx_home_title">Trazer o Início de volta para cá?</string>
-    <string name="lx_home_body">O Início e o gesto de deslizar para cima vão para o launcher do telefone, então sair de um app sai da área de trabalho. Torne o Open Android DeX o app de início e os dois voltam para cá. O Voltar já faz isso.</string>
+    <string name="lx_home_body">O Início e o gesto de deslizar para cima vão para o launcher do telefone, então sair de um app sai da área de trabalho. Torne o Dex-X o app de início e os dois voltam para cá. O Voltar já faz isso.</string>
     <string name="lx_home_set">Definir como início</string>
     <string name="lx_home_not_now">Agora não</string>
     <string name="lx_home_no_chooser">Este telefone não tem uma tela de app de início para abrir.</string>

@@ -23,7 +23,7 @@
         <item quantity="one">%d App</item>
         <item quantity="other">%d Apps</item>
     </plurals>
-    <string name="caption_service_description">Zeichnet die Titelleiste der Desktop-Fenster. Open Android DeX braucht das, um in jedem Fenster eine Leiste zu platzieren; Fensterinhalte werden weder gelesen noch übertragen.</string>
+    <string name="caption_service_description">Zeichnet die Titelleiste der Desktop-Fenster. Dex-X braucht das, um in jedem Fenster eine Leiste zu platzieren; Fensterinhalte werden weder gelesen noch übertragen.</string>
 
     <string name="st_title">DeX-Einstellungen</string>
     <string name="st_search">Einstellungen suchen</string>
@@ -139,7 +139,7 @@
     <string name="st_icons_medium">Mittel</string>
     <string name="st_icons_large">Groß</string>
     <string name="st_home_app">Home-App</string>
-    <string name="st_home_app_yes">Open Android DeX</string>
+    <string name="st_home_app_yes">Dex-X</string>
     <string name="st_home_app_yes_sub">Home und die Wischgeste nach oben kommen zum Desktop zurück.</string>
     <string name="st_home_app_no">Der Launcher des Telefons</string>
     <string name="st_home_app_no_sub">Home und die Wischgeste nach oben verlassen den Desktop. Zum Ändern tippen.</string>
@@ -250,7 +250,7 @@
     <string name="st_scope_cursor">Maus und Zeiger</string>
     <string name="st_scope_display">Anzeigegröße und Sprache</string>
     <string name="st_resources">Entwicklungsressourcen</string>
-    <string name="st_res_repo">Open Android DeX auf GitHub</string>
+    <string name="st_res_repo">Dex-X auf GitHub</string>
     <string name="st_res_repo_sub">Desktop-App, Launcher und Fenster-Daemon</string>
     <string name="st_res_daemon">Quellcode des Fenster-Daemons</string>
     <string name="st_res_daemon_sub">Der shell-uid-Dienst hinter den Titelleisten</string>
@@ -284,7 +284,7 @@
     <string name="lx_pad_reverse">Umgekehrt</string>
     <string name="lx_pad_foot">Eine am Telefon angeschlossene Maus oder Tastatur funktioniert weiterhin wie gewohnt.</string>
     <string name="lx_pad_no_overlay">Das Touchpad braucht die Berechtigung, über anderen Apps zu zeichnen.</string>
-    <string name="lx_pad_no_service">Der Zeiger kann erst klicken, wenn Open Android DeX in den Bedienungshilfen aktiviert ist.</string>
+    <string name="lx_pad_no_service">Der Zeiger kann erst klicken, wenn Dex-X in den Bedienungshilfen aktiviert ist.</string>
     <string name="lx_pad_failed">Das Touchpad konnte nicht geöffnet werden.</string>
 
     <string name="tp_channel">Touchpad</string>
@@ -305,7 +305,7 @@
 
     <!-- Phone: who owns the Home button -->
     <string name="lx_home_title">Home hierher zurückholen?</string>
-    <string name="lx_home_body">Home und die Wischgeste nach oben führen zum Launcher des Telefons — eine App zu verlassen verlässt also den Desktop. Mach Open Android DeX zur Home-App, dann kommen beide hierher zurück. Zurück tut das schon.</string>
+    <string name="lx_home_body">Home und die Wischgeste nach oben führen zum Launcher des Telefons — eine App zu verlassen verlässt also den Desktop. Mach Dex-X zur Home-App, dann kommen beide hierher zurück. Zurück tut das schon.</string>
     <string name="lx_home_set">Als Home festlegen</string>
     <string name="lx_home_not_now">Jetzt nicht</string>
     <string name="lx_home_no_chooser">Dieses Telefon hat keine Einstellung für die Home-App.</string>

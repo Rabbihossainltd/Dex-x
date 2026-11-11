@@ -325,11 +325,20 @@ final class CaptionFallback {
             // window of ours, above every app in the display: the one thing that covers
             // a caption. Both shapes of the caption are measured — the app-bounds inset
             // this renderer can read itself, and a caption WINDOW, which needs a witness.
-            final int platformPx = CaptionRule.captionPx(t.platformCaption(), seenCaption(t, service));
+            final int insetPx = t.platformCaption();
+            final int seenPx = seenCaption(t, service);
+            final int platformPx = CaptionRule.captionPx(insetPx, seenPx);
+            // WHERE the platform's caption is decides where ours goes. An inset pushes the
+            // app's content down inside the task, so the strip to cover starts at the task's
+            // top. A caption WINDOW sits above the task's frame, so covering it means
+            // drawing above that frame — put the bar at `top` there and it lands UNDER the
+            // platform's caption (two bars) while covering the app's own first rows.
+            final int shape = CaptionRule.captionShape(insetPx, seenPx, t.appTop == t.top);
             final int barPx = platformPx > 0 ? platformPx : px;
+            final int barY = CaptionRule.barTop(t.top, shape, platformPx);
 
-            final android.graphics.Rect capRect = new android.graphics.Rect(t.left, t.top,
-                    t.right, t.top + Math.max(1, barPx));
+            final android.graphics.Rect capRect = new android.graphics.Rect(t.left, barY,
+                    t.right, barY + Math.max(1, barPx));
             boolean covered = false;
             for (int jx = 0; jx < ix; jx++) {   // the windows above this one
                 WmClient.Task a = showing.get(jx);
@@ -355,14 +364,14 @@ final class CaptionFallback {
             if (platformPx == 0 && t.appTop == t.top) wm.strip(display, t.taskId, px);
             Bar b = bars.get(t.taskId);
             if (b == null) {
-                b = add(wc, t, barPx);
+                b = add(wc, t, barPx, barY);
                 if (b == null) continue;
                 bars.put(t.taskId, b);
                 DexLog.step("caption", "fallback bar task=" + t.taskId + " " + t.pkg
                         + " " + (t.right - t.left) + "x" + (t.bottom - t.top)
                         + (platformPx > 0 ? " over the platform's " + platformPx + "px" : ""));
             }
-            b.sync(t, barPx);
+            b.sync(t, barPx, barY);
         }
         for (Bar b : new ArrayList<>(bars.values())) {
             if (!live.contains(b.taskId)) {
@@ -473,13 +482,16 @@ final class CaptionFallback {
         final WindowManager.LayoutParams lp;
         final List<Band> bands = new ArrayList<>();
         int left, top, right, bottom;
+        /** The bar's own top edge — above the frame when the platform's caption is a window. */
+        int barY;
 
-        Bar(Context ctx, WmClient.Task t, int px) {
+        Bar(Context ctx, WmClient.Task t, int px, int atY) {
             taskId = t.taskId;
             pkg = t.pkg;
             wmgr = ctx.getSystemService(WindowManager.class);
             root = build(ctx, t, px);
-            lp = params(t.left, t.top, Math.max(1, t.right - t.left), px);
+            barY = atY;
+            lp = params(t.left, atY, Math.max(1, t.right - t.left), px);
             title = (TextView) root.getChildAt(0);
             left = t.left;
             top = t.top;
@@ -487,14 +499,16 @@ final class CaptionFallback {
             bottom = t.bottom;
         }
 
-        void sync(WmClient.Task t, int px) {
+        void sync(WmClient.Task t, int px, int atY) {
             right = t.right;
             bottom = t.bottom;
-            if (t.left != left || t.top != top || lp.width != Math.max(1, right - left)) {
+            if (t.left != left || t.top != top || barY != atY
+                    || lp.width != Math.max(1, right - left)) {
                 left = t.left;
                 top = t.top;
                 lp.x = left;
-                lp.y = top;
+                lp.y = atY;
+                barY = atY;
                 lp.width = Math.max(1, right - left);
                 lp.height = px;
                 try {
@@ -530,11 +544,16 @@ final class CaptionFallback {
         }
     }
 
-    private Bar add(Context ctx, WmClient.Task t, int px) {
+    private Bar add(Context ctx, WmClient.Task t, int px, int atY) {
         try {
-            Bar b = new Bar(ctx, t, px);
+            Bar b = new Bar(ctx, t, px, atY);
             b.wmgr.addView(b.root, b.lp);
             bandsFor(ctx, b);
+            // Windows' caption arrives with the window, not before it: a bar that appears
+            // instantly over a window that is still fading in reads as a flicker.
+            b.root.setAlpha(0f);
+            b.root.setTranslationY(-Math.min(6, px / 3f));
+            b.root.animate().alpha(1f).translationY(0f).setDuration(140).start();
             return b;
         } catch (Throwable e) {
             DexLog.warn("caption", "fallback could not add a bar for task " + t.taskId + ": " + e);
@@ -577,9 +596,19 @@ final class CaptionFallback {
         root.addView(buttons, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT,
                 Gravity.RIGHT | Gravity.CENTER_VERTICAL));
-        buttons.addView(button(ctx, "\u2014", 0xFFE8EAED, v -> minimise(taskId)));
-        buttons.addView(button(ctx, "\u25A1", 0xFFE8EAED, v -> toggleMax(taskId)));
-        buttons.addView(button(ctx, "\u2715", 0xFFFF8A80, v -> close(taskId)));
+        View min = button(ctx, "\u2014", 0xFFE8EAED, v -> minimise(taskId));
+        View max = button(ctx, "\u25A1", 0xFFE8EAED, v -> toggleMax(taskId));
+        View close = button(ctx, "\u2715", 0xFFE8EAED, v -> close(taskId));
+        buttons.addView(min);
+        buttons.addView(max);
+        buttons.addView(close);
+        // Windows' caption buttons: a plain grey glyph that lifts on hover, and the close
+        // button alone turning red — #C42B1C, the colour a Windows title bar uses, with the
+        // glyph going white. Without it the bar read as a picture of a title bar rather
+        // than something to press: nothing under the pointer ever changed.
+        hoverButton(min, 0x33FFFFFF, 0);
+        hoverButton(max, 0x33FFFFFF, 0);
+        hoverButton(close, 0xFFC42B1C, 0xFFFFFFFF);
 
         Drag drag = new Drag(taskId);
         root.setOnTouchListener(drag);
@@ -600,6 +629,45 @@ final class CaptionFallback {
                 ViewGroup.LayoutParams.MATCH_PARENT));
         b.setOnClickListener(onClick);
         return b;
+    }
+
+    /**
+     * Hover and press feedback on a caption button.
+     *
+     * @param hover the background behind the glyph while the pointer is over it, or 0 for
+     *              a subtle tint shared by all of them
+     * @param glyphOnHover the glyph colour while hovered, or 0 to leave it alone
+     */
+    private void hoverButton(View b, int hover, int glyphOnHover) {
+        final int restGlyph = b instanceof TextView ? ((TextView) b).getCurrentTextColor() : 0;
+        b.setOnHoverListener((v, e) -> {
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_HOVER_ENTER:
+                    v.setBackgroundColor(hover);
+                    if (glyphOnHover != 0 && v instanceof TextView) {
+                        ((TextView) v).setTextColor(glyphOnHover);
+                    }
+                    v.setAlpha(1f);
+                    break;
+                case MotionEvent.ACTION_HOVER_EXIT:
+                    v.setBackgroundColor(0x00000000);
+                    if (v instanceof TextView) ((TextView) v).setTextColor(restGlyph);
+                    v.setAlpha(0.82f);
+                    break;
+                default:
+                    break;
+            }
+            return false;          // the click listener still gets it
+        });
+        b.setAlpha(0.82f);
+        b.setOnTouchListener((v, e) -> {
+            if (e.getActionMasked() == MotionEvent.ACTION_DOWN) v.animate().scaleX(0.92f).scaleY(0.92f).setDuration(70).start();
+            else if (e.getActionMasked() == MotionEvent.ACTION_UP
+                    || e.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+                v.animate().scaleX(1f).scaleY(1f).setDuration(110).start();
+            }
+            return false;          // never consume: the click must still land
+        });
     }
 
     private void minimise(int taskId) {

@@ -194,6 +194,37 @@ public final class CaptionRuleTest {
         expect("no second bar: a covered window gets nothing, not the service's bar",
                 CaptionRule.owner(0, true, false, true) == CaptionRule.NONE, "");
 
+        // ── where the bar goes: the shape of the platform's caption ──────────
+        //
+        // INSET: WM Shell, Android 14+. The caption is inside the task and the app's
+        // surface is pushed down, so the strip to cover starts at the task's top.
+        expect("inset caption: bar sits on the task's top",
+                CaptionRule.barTop(300, CaptionRule.captionShape(48, 0, false), 48) == 300, "");
+        expect("inset caption: shape is INSET", CaptionRule.captionShape(48, 0, false) == CaptionRule.CAPTION_INSET, "");
+
+        // WINDOW: One UI and everything before 14. The caption is a separate window ABOVE
+        // the task's frame. Drawing at the top is the "two caption bars" bug — ours lands
+        // under the platform's and covers the app's first rows.
+        expect("window caption: bar sits ABOVE the task's top",
+                CaptionRule.barTop(300, CaptionRule.captionShape(0, 48, true), 48) == 252, "");
+        expect("window caption: shape is WINDOW", CaptionRule.captionShape(0, 48, true) == CaptionRule.CAPTION_WINDOW, "");
+
+        // Seen, and the content did move down: that is an inset measured the other way,
+        // not a window — covering above the frame there would eat the window's own edge.
+        expect("a caption that moved the content is an INSET however it was measured",
+                CaptionRule.captionShape(0, 48, false) == CaptionRule.CAPTION_INSET
+                        && CaptionRule.barTop(300, CaptionRule.captionShape(0, 48, false), 48) == 300, "");
+
+        // No caption at all: the bar is ours, at the task's top.
+        expect("no caption: the bar stays on the task's top",
+                CaptionRule.captionShape(0, 0, true) == CaptionRule.CAPTION_NONE
+                        && CaptionRule.barTop(300, CaptionRule.CAPTION_NONE, 0) == 300, "");
+
+        // Both measured: the inset is decisive, and the taller of the two is covered.
+        expect("both measured: inset wins and the taller height is used",
+                CaptionRule.captionShape(48, 40, true) == CaptionRule.CAPTION_INSET
+                        && CaptionRule.captionPx(48, 40) == 48, "");
+
         System.out.println();
         System.out.println(fails == 0 ? "ALL RULE CASES PASS" : fails + " CASE(S) FAILED");
         System.exit(fails == 0 ? 0 : 1);
