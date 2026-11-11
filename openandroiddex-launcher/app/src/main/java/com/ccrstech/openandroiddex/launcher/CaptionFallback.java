@@ -335,7 +335,9 @@ final class CaptionFallback {
             // platform's caption (two bars) while covering the app's own first rows.
             final int shape = CaptionRule.captionShape(insetPx, seenPx, t.appTop == t.top);
             final int barPx = platformPx > 0 ? platformPx : px;
-            final int barY = CaptionRule.barTop(t.top, shape, platformPx);
+            // Never above the display: a caption window on a task flush with the top
+            // edge is partly off-screen, and a bar at a negative y is not drawn at all.
+            final int barY = Math.max(0, CaptionRule.barTop(t.top, shape, platformPx));
 
             final android.graphics.Rect capRect = new android.graphics.Rect(t.left, barY,
                     t.right, barY + Math.max(1, barPx));
@@ -388,6 +390,8 @@ final class CaptionFallback {
         // smaller than `showing` — a guard that quietly stopped guarding.
         ProbeCache.sweep(probed, idsOf(tasks));
 
+        coverHome(tasks, baseId, service);
+
         // The windows WE hid: a task that is visible again came back on its own (or
         // something else un-hid it), and a task the daemon no longer has is closed.
         // Anything else stays, which is what keeps its tile on the taskbar.
@@ -435,7 +439,98 @@ final class CaptionFallback {
         return ids;
     }
 
+    // ── the desktop's own caption ─────────────────────────────────────────
+    //
+    // The home is never decorated by US — see the base-task rule above, and CaptionService's
+    // isDesktopTask. That says nothing about the PLATFORM, though: on a display in desktop
+    // mode it can still draw its own caption on the home task, and then the desktop has a
+    // title strip with ▢ ✕ over the wallpaper: "home a old caption bar dekhai".
+    //
+    // pinHome() is the proper answer and runs every pass — UNFLOAT the task, and if the phone
+    // will not take it out of freeform, replace the task with a fullscreen one. This is what
+    // happens when even that fails: the strip is COVERED. Not a decoration of ours — the
+    // removal the platform would not do. The cover has no buttons, because the rule for the
+    // home is that it has nothing to close or minimise, and it swallows touches so the
+    // platform's own ▢ ✕ under it cannot be pressed.
+
+    private View homeCover;
+    private WindowManager.LayoutParams homeCoverLp;
+    private WindowManager homeCoverWm;
+
+    private void coverHome(List<WmClient.Task> tasks, int baseId, boolean service) {
+        WmClient.Task home = null;
+        for (WmClient.Task t : tasks) {
+            boolean ours = app.getPackageName().equals(t.pkg) && isHomeActivity(t.activity);
+            if (ours || t.taskId == baseId) home = t;
+            if (ours) break;
+        }
+        if (home == null) {
+            dropHomeCover();
+            return;
+        }
+        final int insetPx = home.platformCaption();
+        final int seenPx = seenCaption(home, service);
+        final int px = CaptionRule.captionPx(insetPx, seenPx);
+        // Nothing above the home's own content: the phone gave us the fullscreen that
+        // pinHome asked for, and there is nothing to cover.
+        if (px <= 0 && home.appTop == home.top) {
+            dropHomeCover();
+            return;
+        }
+        final int height = px > 0 ? px : Math.round(CAPTION_DP * density(app));
+        final int shape = CaptionRule.captionShape(insetPx, seenPx, home.appTop == home.top);
+        final int y = Math.max(0, CaptionRule.barTop(home.top, shape, height));
+        final int w = Math.max(1, home.right - home.left);
+        if (homeCover == null) {
+            Context ctx = host != null ? host : app;
+            homeCoverWm = ctx.getSystemService(WindowManager.class);
+            homeCover = new View(ctx);
+            homeCover.setBackgroundColor(0xFF202124);      // the taskbar's own colour
+            homeCover.setClickable(true);                   // swallow the platform's buttons
+            homeCover.setOnClickListener(v -> { });
+            homeCoverLp = params(home.left, y, w, height);
+            try {
+                homeCoverWm.addView(homeCover, homeCoverLp);
+                DexLog.step("desktop", "the platform put a caption on the desktop's home — "
+                        + "covering it (task " + home.taskId + ", " + height + "px)");
+            } catch (Throwable e) {
+                DexLog.warn("desktop", "could not cover the home's caption: " + e);
+                homeCover = null;
+                return;
+            }
+        } else if (homeCoverLp.x != home.left || homeCoverLp.y != y
+                || homeCoverLp.width != w || homeCoverLp.height != height) {
+            homeCoverLp.x = home.left;
+            homeCoverLp.y = y;
+            homeCoverLp.width = w;
+            homeCoverLp.height = height;
+            try {
+                homeCoverWm.updateViewLayout(homeCover, homeCoverLp);
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    private void dropHomeCover() {
+        if (homeCover == null) return;
+        try {
+            if (homeCover.isAttachedToWindow()) homeCoverWm.removeViewImmediate(homeCover);
+        } catch (Throwable ignored) {
+        }
+        homeCover = null;
+        homeCoverLp = null;
+        DexLog.step("desktop", "the desktop's home is fullscreen again — cover removed");
+    }
+
     /** One of our own windows that wears a bar like any app window. */
+    /** The desktop's own home activity, in any of the forms a dumpsys parse produces. */
+    private boolean isHomeActivity(String activity) {
+        if (activity == null || activity.isEmpty()) return true;   // our package, no activity
+        String simple = LauncherActivity.class.getSimpleName();
+        return activity.equals(LauncherActivity.class.getName()) || activity.equals(simple)
+                || activity.endsWith("." + simple);
+    }
+
     private boolean isChrome(WmClient.Task t) {
         return SettingsActivity.class.getName().equals(t.activity)
                 || TaskManagerActivity.class.getName().equals(t.activity)

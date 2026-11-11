@@ -576,6 +576,19 @@ public class LauncherActivity extends Activity implements WidgetLaunch.Desktop {
         if (onPhone()) return;
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                // EDGE TO EDGE, or hiding the bars is only half the job.
+                //
+                // hide(systemBars()) removes the bar's surface, but the window's layout
+                // still reserves the space the bar occupied — decor draws as if the bar
+                // were there. The reserved strip is then nothing at all, and what shows
+                // through is the window background: black. That is the report "navigation
+                // bar full ashe na, olpo ektu kalo hoi" — the nav bar was never drawn, the
+                // desktop simply stopped short of the edge and left a hole.
+                //
+                // The pre-R branch below has always done the equivalent
+                // (SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION); this one never did, because
+                // hide() alone looks like it should be enough.
+                getWindow().setDecorFitsSystemWindows(false);
                 android.view.WindowInsetsController c = getWindow().getInsetsController();
                 if (c == null) return;
                 c.setSystemBarsBehavior(

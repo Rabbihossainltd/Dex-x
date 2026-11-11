@@ -128,6 +128,46 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.27 — the home's caption and the black strip, fixed with a cause
+
+Both were reported twice. The first two times I said the code already handled them, which was
+true and useless: the code was right about what it *attempted* and wrong about what it achieved.
+
+### 3. The navigation bar "does not come fully, a bit of black"
+
+On Android 11+ the launcher called `WindowInsetsController.hide(systemBars())` and stopped
+there. Hiding a bar removes its surface; it does **not** stop the window's layout reserving the
+space that bar occupied. The decor keeps drawing as if the bar were still there, the reserved
+strip becomes nothing at all, and what shows through is the window background — black.
+
+The pre-R branch of the same method has always carried `SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION`,
+which is the same idea. The newer branch never got it, because `hide()` alone looks like it
+should be enough.
+
+`setDecorFitsSystemWindows(false)` before the hide. That is what "full ashe na, olpo kalo" was.
+
+### 1. The platform's caption on the desktop home
+
+Three things already try to stop this: the home is never started with `--windowingMode 5`, it is
+unfloated if it ends up in a window, and the task is replaced with a fullscreen one if the phone
+refuses. What was missing is what happens when the phone refuses *all three* — the platform's
+caption simply stayed, with its own ▢ ✕ over the wallpaper.
+
+`CaptionFallback.coverHome()` now covers that strip when it is measured: the taskbar's own
+colour, **no buttons** (the home has nothing to close or minimise, by your rule), and it swallows
+touches so the platform's buttons under it cannot be pressed. When `pinHome()` does succeed the
+strip measures zero and the cover is removed, so this is a floor, not a decoration.
+
+### The audit of the earlier fixes
+
+Fifteen claims from 0.7.22 to 0.7.26 re-checked in the source: all still true. A string check is
+weak evidence, though — it is how four wrong fixes survived — so each one is also covered by a
+rule case or an audit check that has been *proven to fail* with the bug put back. Three new
+checks this round, all mutation-tested.
+
+Suites: audit **91/91**, rule **32/32 + 6 placement**, probe cache **11/11**, dump **9/9**,
+protocol **6/6**.
+
 ## v0.7.26 — the six reports from the phone, and what each one actually was
 
 ### 4. Two caption bars on some apps, top cut and bottom blank (fixed)

@@ -559,6 +559,20 @@ check("threads: the probe sweep is guarded once, against the list it sweeps",
       and "ProbeCache.shouldSweep(probed.size(), showing.size())" not in fallback,
       "two guards disagreeing is a guard that stops guarding")
 
+check("home: the platform's caption on the desktop is covered when it cannot be removed",
+      "private void coverHome(" in fallback
+      and "homeCover.setClickable(true);" in fallback
+      and "setOnClickListener(v -> { })" in fallback,
+      "the cover must swallow touches or the platform's buttons stay pressable under it")
+
+check("bars: the launcher window goes edge to edge before hiding the system bars",
+      "getWindow().setDecorFitsSystemWindows(false);" in launcher("LauncherActivity.java"),
+      "hide() alone leaves the bar's strip reserved, and the gap shows as black")
+
+check("bars: a bar above a task is never placed off-screen",
+      "Math.max(0, CaptionRule.barTop(t.top, shape, platformPx))" in fallback,
+      "a caption window on a task flush with the top would put the bar at y<0")
+
 check("caption: the bar is placed by the SHAPE of the platform's caption",
       "CaptionRule.captionShape(" in fallback and "CaptionRule.barTop(" in fallback
       and "static int barTop(int taskTop, int shape, int captionPx)" in read(LAUNCHER / "CaptionRule.java"),
