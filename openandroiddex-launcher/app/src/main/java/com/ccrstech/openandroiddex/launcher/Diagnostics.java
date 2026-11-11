@@ -116,6 +116,33 @@ final class Diagnostics {
             b.append("  threw: ").append(t).append('\n');
         }
 
+        b.append("\n-- the desktop's own home --\n");
+        try {
+            WmClient wm2 = new WmClient();
+            int desk = wm2.desktopDisplay();
+            List<WmClient.Task> live = desk < 0 ? null : wm2.list(desk);
+            if (live == null || live.isEmpty()) {
+                b.append("  (no task list)\n");
+            } else {
+                WmClient.Task base = live.get(live.size() - 1);
+                b.append("  base task ").append(base.taskId).append(" pkg=")
+                        .append(String.valueOf(base.pkg)).append(" activity=")
+                        .append(String.valueOf(base.activity)).append('\n');
+                b.append("  base bounds [").append(base.left).append(',').append(base.top)
+                        .append(" ").append(base.right).append(',').append(base.bottom)
+                        .append("] appBounds top=").append(base.appTop)
+                        .append(" (an inset of ").append(base.appTop - base.top).append("px)\n");
+                b.append("  base windowingMode=").append(base.windowingMode)
+                        .append(" freeform=").append(base.isFreeform()).append('\n');
+                b.append("  daemon caption probe on the base task: ")
+                        .append(wm2.captionProbe(desk, base.taskId)).append(" px\n");
+            }
+        } catch (Throwable t) {
+            b.append("  threw: ").append(t).append('\n');
+        }
+        b.append("  our cover over the home's caption: ")
+                .append(CaptionFallback.homeCoverState()).append('\n');
+
         b.append("\n-- our bars against the platform's captions --\n");
         try {
             b.append(CaptionService.describeDressing());

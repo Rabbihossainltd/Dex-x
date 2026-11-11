@@ -469,7 +469,15 @@ final class CaptionFallback {
             return;
         }
         final int insetPx = home.platformCaption();
-        final int seenPx = seenCaption(home, service);
+        // NOT seenCaption(home, service). That one trusts the accessibility service —
+        // "the service can see, and it sees nothing" — but this service NEVER MEASURES
+        // THE HOME: applyTasks skips it a few lines before the measurement, by design,
+        // because the home must not be dressed. So its answer for the home is always
+        // zero, and with the service bound it does not even fall through to the daemon.
+        // The cover was therefore blind to the very caption it exists to cover, on every
+        // phone where the service is on — which is why "home a old caption bar" survived
+        // four releases of fixes that looked right.
+        final int seenPx = probeDaemonCaption(home);
         final int px = CaptionRule.captionPx(insetPx, seenPx);
         // Nothing above the home's own content: the phone gave us the fullscreen that
         // pinHome asked for, and there is nothing to cover.
@@ -509,6 +517,15 @@ final class CaptionFallback {
             } catch (Throwable ignored) {
             }
         }
+    }
+
+    /** One line for the diagnostics report: is the desktop's caption covered, and why. */
+    static String homeCoverState() {
+        CaptionFallback f = instance;
+        if (f == null) return "no fallback instance";
+        if (f.homeCover == null) return "none up";
+        return "up at y=" + f.homeCoverLp.y + " h=" + f.homeCoverLp.height
+                + " x=" + f.homeCoverLp.x + " w=" + f.homeCoverLp.width;
     }
 
     private void dropHomeCover() {
@@ -558,6 +575,22 @@ final class CaptionFallback {
         probed.put(t.taskId, new long[]{px, now});
         if (px > 0) DexLog.step("caption", "task " + t.taskId + ": the daemon sees a "
                 + px + "px caption window on it");
+        return px;
+    }
+
+    /**
+     * The platform's caption height on a task, asked of the daemon, cached by
+     * {@link #PROBE_TTL_MS}. Used where the accessibility service's own measurement list
+     * cannot be trusted — the home, which that service deliberately never measures.
+     */
+    private int probeDaemonCaption(WmClient.Task t) {
+        long now = SystemClock.uptimeMillis();
+        long[] hit = probed.get(t.taskId);
+        if (hit != null && now - hit[1] < PROBE_TTL_MS) return (int) hit[0];
+        int px = wm.captionProbe(display, t.taskId);
+        probed.put(t.taskId, new long[]{px, now});
+        if (px > 0) DexLog.step("desktop", "the daemon sees a " + px + "px caption window on task "
+                + t.taskId + " (" + t.pkg + ")");
         return px;
     }
 

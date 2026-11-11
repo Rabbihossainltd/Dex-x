@@ -254,6 +254,7 @@ public class FileTransferActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        SystemBars.apply(this);   // edge to edge: see SystemBars
         // The taskbar's only way to know this window exists — our own package
         // has no icon on this desktop.
         OwnWindows.opened(this);
@@ -1549,4 +1550,12 @@ public class FileTransferActivity extends Activity {
                 Math.min(255, Color.green(color) + 24),
                 Math.min(255, Color.blue(color) + 24));
     }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        // Focus is when the platform puts its bars back.
+        if (hasFocus) SystemBars.apply(this);
+    }
+
 }

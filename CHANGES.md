@@ -128,6 +128,61 @@ still along the bottom of the desktop display.
 
 ---
 
+## v0.7.28 — why the last four releases changed nothing, and what ends that
+
+Five releases of fixes and the phone behaved identically. That is not five wrong fixes; it is
+a method that cannot see. This release does three things: fixes a defect that explains one of
+the reports completely, fixes the thing that made every other report unfixable, and stops
+guessing.
+
+### The defect that explains the home's caption
+
+`CaptionFallback.seenCaption()` asks the accessibility service first, and if the service is
+bound it trusts the answer:
+
+```java
+int fromService = CaptionService.platformCaptionHeight(t.taskId);
+if (fromService > 0) return fromService;
+if (service) return 0;          // "the service can see, and it sees nothing"
+```
+
+But `CaptionService.applyTasks()` **skips the home deliberately** — a few lines before the
+measurement, so the home is never dressed. So `platformCaptionHeight(home)` is always 0, and
+with the service bound the answer never falls through to the daemon either. The renderer's
+answer for the home was therefore **"no caption" on every phone where the accessibility
+service is on** — which is precisely the state in which the user reports one.
+
+v0.7.27 added a cover for that caption. The cover asked this function. It could never fire.
+
+`probeDaemonCaption()` asks the daemon directly, cached, service state irrelevant.
+
+### The thing that made the rest unfixable
+
+Four rounds went out on a screenshot and a guess, and every guess was wrong for the same
+reason: the three facts that decide all of this — is the accessibility service bound, what
+does the daemon actually report for this task, and what are the measured caption heights —
+are invisible from outside and fail silently.
+
+`Settings → About → Copy diagnostics` now puts the whole session on the clipboard: the
+version, the verdict, whether the service is running and enabled, the daemon's answers, every
+display with its size and name, every task on both displays with its frame, app bounds,
+windowing mode and caption height, the platform's decoration switch, the accessibility window
+list, and a new section for the desktop's own home — its base task, its inset, the daemon's
+probe on it, and whether our cover is up and where.
+
+One paste of that text and the remaining reports become arithmetic instead of guesswork.
+
+### Bars, in every window of ours
+
+The desktop hid the system bars; Settings, the Task Manager and File Transfer never did. A
+window that keeps the navigation bar also keeps the strip it occupies reserved, so it draws
+short of the display's edge and the gap shows the window background: black. That is "navigation
+full ashe na, olpo ektu kalo hoi" for whichever of our windows is on top. `SystemBars.apply()`
+gives all four the same treatment — edge to edge first, then hide — and re-applies on focus.
+
+Suites: audit **94/94** (three new checks, two proven to fail with the defect put back), rule
+**32/32 + 6**, probe cache **11/11**, dump **9/9**, protocol **6/6**.
+
 ## v0.7.27 — the home's caption and the black strip, fixed with a cause
 
 Both were reported twice. The first two times I said the code already handled them, which was

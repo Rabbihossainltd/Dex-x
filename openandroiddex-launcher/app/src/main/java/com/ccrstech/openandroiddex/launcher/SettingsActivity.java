@@ -240,6 +240,7 @@ public class SettingsActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        SystemBars.apply(this);   // edge to edge: see SystemBars
         // Our own package has no taskbar icon, so this window's only presence
         // there is the tile OwnWindows drives.
         OwnWindows.opened(this);
@@ -3284,6 +3285,46 @@ public class SettingsActivity extends Activity {
         version.setBackground(roundedFill(blend(theme.accent, 0x1F), 12));
         version.setPadding(dp(14), dp(6), dp(14), dp(6));
         hero.addView(version);
+
+        // One tap, and the whole truth about this session is on the clipboard: which
+        // display, whether the accessibility service is bound, what the daemon answers,
+        // every task with its frame and app bounds, every caption height measured, and
+        // what our own bars are doing against the platform's. Four rounds of fixes went
+        // out on screenshots and guesses; this is the thing that ends that.
+        TextView diag = new TextView(this);
+        diag.setText("Copy diagnostics");
+        diag.setTextColor(theme.accent);
+        diag.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(12));
+        diag.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        diag.setBackground(roundedFill(blend(theme.accent, 0x1F), 12));
+        diag.setPadding(dp(14), dp(6), dp(14), dp(6));
+        diag.setClickable(true);
+        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        dlp.topMargin = dp(10);
+        hero.addView(diag, dlp);
+        diag.setOnClickListener(v -> {
+            CharSequence text;
+            try {
+                text = Diagnostics.report(getApplicationContext());
+            } catch (Throwable t) {
+                text = "diagnostics failed: " + t;
+            }
+            android.content.ClipboardManager cm =
+                    getSystemService(android.content.ClipboardManager.class);
+            if (cm != null) {
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("Dex-X diagnostics", text));
+                android.widget.Toast.makeText(this, "Diagnostics copied to the clipboard",
+                        android.widget.Toast.LENGTH_SHORT).show();
+            }
+            try {
+                java.io.File out = new java.io.File(getExternalFilesDir(null), "diagnostics.txt");
+                java.io.FileWriter w = new java.io.FileWriter(out, false);
+                w.write(text.toString());
+                w.close();
+            } catch (Throwable ignored) {
+            }
+        });
 
         TextView display = new TextView(this);
         int displayId = getDisplay() != null ? getDisplay().getDisplayId() : 0;

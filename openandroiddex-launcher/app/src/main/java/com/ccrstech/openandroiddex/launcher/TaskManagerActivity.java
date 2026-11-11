@@ -187,6 +187,7 @@ public class TaskManagerActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        SystemBars.apply(this);   // edge to edge: see SystemBars
         OwnWindows.opened(this);
         theme = DexTheme.of(this);
         stats = new SysStats(this);
@@ -634,4 +635,12 @@ public class TaskManagerActivity extends Activity {
                 Math.min(255, Color.green(color) + 24),
                 Math.min(255, Color.blue(color) + 24));
     }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        // Focus is when the platform puts its bars back.
+        if (hasFocus) SystemBars.apply(this);
+    }
+
 }

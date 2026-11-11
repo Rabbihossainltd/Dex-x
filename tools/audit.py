@@ -559,6 +559,24 @@ check("threads: the probe sweep is guarded once, against the list it sweeps",
       and "ProbeCache.shouldSweep(probed.size(), showing.size())" not in fallback,
       "two guards disagreeing is a guard that stops guarding")
 
+check("home: the cover asks the daemon, not the service that never measures the home",
+      "probeDaemonCaption(home)" in fallback
+      and "final int px = CaptionRule.captionPx(insetPx, seenPx);" in fallback.split("private void coverHome(")[1][:1600],
+      "with the service bound, seenCaption() answers 0 for the home by design")
+
+check("bars: every window of ours goes edge to edge, not just the desktop",
+      "SystemBars.apply(this);" in launcher("SettingsActivity.java")
+      and "SystemBars.apply(this);" in launcher("TaskManagerActivity.java")
+      and "SystemBars.apply(this);" in launcher("FileTransferActivity.java")
+      and "a.getWindow().setDecorFitsSystemWindows(false);" in launcher("SystemBars.java"),
+      "a sibling window that keeps the nav bar also keeps its strip reserved — black")
+
+check("diagnostics: one tap copies the whole session state",
+      "Copy diagnostics" in launcher("SettingsActivity.java")
+      and "Diagnostics.report(getApplicationContext())" in launcher("SettingsActivity.java")
+      and "probeDaemonCaption(" in launcher("CaptionFallback.java"),
+      "four rounds went out on screenshots")
+
 check("home: the platform's caption on the desktop is covered when it cannot be removed",
       "private void coverHome(" in fallback
       and "homeCover.setClickable(true);" in fallback
